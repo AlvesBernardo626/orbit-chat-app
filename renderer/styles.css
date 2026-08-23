@@ -408,6 +408,22 @@ a { color: var(--accent); }
 .picker-source img { width: 100%; height: 90px; object-fit: cover; border-radius: 6px; background: #000; }
 .picker-source-name { font-size: 12px; color: var(--text-secondary); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* ---------- Groups ---------- */
+.group-member-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+.group-member-row {
+  display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 8px; cursor: pointer;
+}
+.group-member-row:hover { background: var(--bg-elevated); }
+.group-member-row.locked { cursor: default; opacity: 0.7; }
+.group-member-checkbox {
+  width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid #4a4c52; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.group-member-row.checked .group-member-checkbox { background: var(--accent); border-color: var(--accent); }
+.group-member-name { font-size: 14px; font-weight: 600; color: var(--text-secondary); flex: 1; }
+.group-member-row.checked .group-member-name, .group-member-row.locked .group-member-name { color: var(--text-primary); }
+.group-member-tag { color: var(--text-muted); font-weight: 600; }
+
 /* ---------- Toast ---------- */
 .toast-container { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
 .toast {

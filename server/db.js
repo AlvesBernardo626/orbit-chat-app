@@ -3,10 +3,12 @@ const crypto = require('crypto');
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 
+const MAX_GROUP_MEMBERS = 10;
+
 function createDb(dbFilePath) {
   const adapter = new FileSync(dbFilePath);
   const db = low(adapter);
-  db.defaults({ users: [], friendships: [], messages: [] }).write();
+  db.defaults({ users: [], friendships: [], messages: [], groups: [] }).write();
 
   function generateTag(username) {
     const usernameLower = username.toLowerCase();
@@ -185,6 +187,70 @@ function createDb(dbFilePath) {
     return conv[conv.length - 1] || null;
   }
 
+  function createGroup(creatorId, name, memberIds) {
+    const uniqueMembers = [...new Set(memberIds)];
+    if (uniqueMembers.length < 2) return { error: 'need_more_members' };
+    if (uniqueMembers.length > MAX_GROUP_MEMBERS) return { error: 'too_many_members' };
+    const id = crypto.randomUUID();
+    const group = {
+      id,
+      name: (name && name.trim().slice(0, 40)) || 'Novo grupo',
+      icon: { type: 'initials', color: pickColor(id) },
+      members: uniqueMembers,
+      createdBy: creatorId,
+      createdAt: Date.now(),
+    };
+    db.get('groups').push(group).write();
+    return { group };
+  }
+
+  function getGroupById(id) {
+    return db.get('groups').find({ id }).value();
+  }
+
+  function isGroupMember(groupId, userId) {
+    const group = getGroupById(groupId);
+    return !!(group && group.members.includes(userId));
+  }
+
+  function updateGroup(id, { name, icon }) {
+    const patch = {};
+    if (name !== undefined) patch.name = name.trim().slice(0, 40) || 'Novo grupo';
+    if (icon !== undefined) patch.icon = icon;
+    db.get('groups').find({ id }).assign(patch).write();
+    return getGroupById(id);
+  }
+
+  function addGroupMembers(groupId, newMemberIds) {
+    const group = getGroupById(groupId);
+    if (!group) return { error: 'not_found' };
+    const merged = [...new Set([...group.members, ...newMemberIds])];
+    if (merged.length > MAX_GROUP_MEMBERS) return { error: 'too_many_members' };
+    db.get('groups').find({ id: groupId }).assign({ members: merged }).write();
+    return { group: getGroupById(groupId) };
+  }
+
+  function listGroupsForUser(userId) {
+    return db.get('groups').filter((g) => g.members.includes(userId)).value();
+  }
+
+  function addGroupMessage(groupId, fromId, text) {
+    const message = {
+      id: crypto.randomUUID(),
+      groupId,
+      from: fromId,
+      text: String(text).slice(0, 4000),
+      createdAt: Date.now(),
+    };
+    db.get('messages').push(message).write();
+    return message;
+  }
+
+  function getGroupConversation(groupId, limit = 200) {
+    const all = db.get('messages').filter((m) => m.groupId === groupId).value();
+    return all.slice(-limit);
+  }
+
   return {
     createUser,
     getUserById,
@@ -201,7 +267,15 @@ function createDb(dbFilePath) {
     addMessage,
     getConversation,
     lastMessageWith,
+    createGroup,
+    getGroupById,
+    isGroupMember,
+    updateGroup,
+    addGroupMembers,
+    listGroupsForUser,
+    addGroupMessage,
+    getGroupConversation,
   };
 }
 
-module.exports = { createDb };
+module.exports = { createDb, MAX_GROUP_MEMBERS };

@@ -67,6 +67,24 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
     };
   }
 
+  function publicGroup(group) {
+    if (!group) return null;
+    return {
+      id: group.id,
+      name: group.name,
+      icon: group.icon,
+      createdBy: group.createdBy,
+      members: group.members.map((id) => publicUser(db.getUserById(id))).filter(Boolean),
+    };
+  }
+
+  /** groupId -> Set<userId> currently connected to that group's active call */
+  const groupCallParticipants = new Map();
+
+  function onlineGroupMembers(group, excludeUserId) {
+    return group.members.filter((id) => id !== excludeUserId && presence.has(id) && presence.get(id).size > 0);
+  }
+
   io.on('connection', (socket) => {
     let currentUserId = null;
 
@@ -180,6 +198,132 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       ack && ack({ messages: history });
     });
 
+    // --- Groups ---
+    socket.on('group:create', ({ name, memberIds }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const others = Array.isArray(memberIds) ? memberIds : [];
+      for (const id of others) {
+        if (!db.areFriends(currentUserId, id)) return ack && ack({ error: 'not_friends' });
+      }
+      const result = db.createGroup(currentUserId, name, [currentUserId, ...others]);
+      if (result.error) return ack && ack({ error: result.error });
+      const payload = publicGroup(result.group);
+      result.group.members.forEach((id) => io.to(`user:${id}`).emit('group:created', payload));
+      ack && ack({ ok: true, group: payload });
+    });
+
+    socket.on('group:update', ({ groupId, name, icon }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      const updated = db.updateGroup(groupId, { name, icon });
+      const payload = publicGroup(updated);
+      updated.members.forEach((id) => io.to(`user:${id}`).emit('group:updated', payload));
+      ack && ack({ ok: true, group: payload });
+    });
+
+    socket.on('group:add-members', ({ groupId, memberIds }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      const others = Array.isArray(memberIds) ? memberIds : [];
+      for (const id of others) {
+        if (!db.areFriends(currentUserId, id)) return ack && ack({ error: 'not_friends' });
+      }
+      const result = db.addGroupMembers(groupId, others);
+      if (result.error) return ack && ack({ error: result.error });
+      const payload = publicGroup(result.group);
+      result.group.members.forEach((id) => io.to(`user:${id}`).emit('group:updated', payload));
+      ack && ack({ ok: true, group: payload });
+    });
+
+    socket.on('groups:list', (_payload, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const groups = db.listGroupsForUser(currentUserId).map(publicGroup);
+      ack && ack({ groups });
+    });
+
+    socket.on('group:message:send', ({ groupId, text }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      const trimmed = String(text || '').trim();
+      if (!trimmed) return ack && ack({ error: 'empty' });
+      const message = db.addGroupMessage(groupId, currentUserId, trimmed);
+      ack && ack({ ok: true, message });
+      const group = db.getGroupById(groupId);
+      group.members.forEach((id) => {
+        if (id !== currentUserId) io.to(`user:${id}`).emit('group:message:receive', message);
+      });
+    });
+
+    socket.on('group:messages:history', ({ groupId }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      const history = db.getGroupConversation(groupId);
+      ack && ack({ messages: history });
+    });
+
+    // --- Group call signaling (mesh: every participant connects to every other) ---
+    socket.on('call:group-start', ({ groupId }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const group = db.getGroupById(groupId);
+      if (!group || !group.members.includes(currentUserId)) return ack && ack({ error: 'not_member' });
+      if (!groupCallParticipants.has(groupId)) groupCallParticipants.set(groupId, new Set());
+      groupCallParticipants.get(groupId).add(currentUserId);
+      const caller = db.getUserById(currentUserId);
+      onlineGroupMembers(group, currentUserId).forEach((id) => {
+        io.to(`user:${id}`).emit('call:group-incoming', { group: publicGroup(group), from: publicUser(caller) });
+      });
+      ack && ack({ ok: true });
+    });
+
+    socket.on('call:group-join', ({ groupId }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const group = db.getGroupById(groupId);
+      if (!group || !group.members.includes(currentUserId)) return ack && ack({ error: 'not_member' });
+      if (!groupCallParticipants.has(groupId)) groupCallParticipants.set(groupId, new Set());
+      const participants = groupCallParticipants.get(groupId);
+      const existing = [...participants].filter((id) => id !== currentUserId);
+      participants.add(currentUserId);
+      const joiner = db.getUserById(currentUserId);
+      existing.forEach((id) => {
+        io.to(`user:${id}`).emit('call:group-participant-joined', { groupId, user: publicUser(joiner) });
+      });
+      ack && ack({ ok: true, participants: existing.map((id) => publicUser(db.getUserById(id))) });
+    });
+
+    socket.on('call:group-leave', ({ groupId }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const participants = groupCallParticipants.get(groupId);
+      if (participants) {
+        participants.delete(currentUserId);
+        participants.forEach((id) => {
+          io.to(`user:${id}`).emit('call:group-participant-left', { groupId, userId: currentUserId });
+        });
+        if (participants.size === 0) groupCallParticipants.delete(groupId);
+      }
+      ack && ack({ ok: true });
+    });
+
+    const groupRelay = (event) => (payload, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const { groupId, to } = payload;
+      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      io.to(`user:${to}`).emit(event, { ...payload, from: currentUserId });
+      ack && ack({ ok: true });
+    };
+    socket.on('call:group-offer', groupRelay('call:group-offer'));
+    socket.on('call:group-answer', groupRelay('call:group-answer'));
+    socket.on('call:group-ice-candidate', groupRelay('call:group-ice-candidate'));
+
+    socket.on('screenshare:group-state', ({ groupId, sharing }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const participants = groupCallParticipants.get(groupId);
+      if (!participants || !participants.has(currentUserId)) return ack && ack({ error: 'not_in_call' });
+      participants.forEach((id) => {
+        if (id !== currentUserId) io.to(`user:${id}`).emit('screenshare:group-state', { groupId, userId: currentUserId, sharing });
+      });
+      ack && ack({ ok: true });
+    });
+
     // --- Call signaling (relay only) ---
     const relay = (event) => (payload, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
@@ -222,6 +366,14 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
           presence.delete(currentUserId);
           const user = db.getUserById(currentUserId);
           if (user) broadcastPresence(user);
+          groupCallParticipants.forEach((participants, groupId) => {
+            if (!participants.has(currentUserId)) return;
+            participants.delete(currentUserId);
+            participants.forEach((id) => {
+              io.to(`user:${id}`).emit('call:group-participant-left', { groupId, userId: currentUserId });
+            });
+            if (participants.size === 0) groupCallParticipants.delete(groupId);
+          });
         }
       }
     });

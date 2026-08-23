@@ -1,20 +1,29 @@
 import { emit, on } from './api.js';
 import { callManager } from './call.js';
+import { groupCallManager } from './groupCall.js';
 import {
   escapeHtml, initials, avatarStyle, statusLabel, statusDotClass,
   formatTime, formatDayTime, toast, el,
 } from './ui.js';
+
+const MAX_GROUP_MEMBERS = 10;
 
 const state = {
   currentUser: null,
   friends: [],
   incoming: [],
   outgoing: [],
+  groups: [],
   activeTab: 'friends',
+  selectedType: null, // 'dm' | 'group' | null
   selectedPeerId: null,
+  selectedGroupId: null,
   conversations: {}, // peerId -> { messages: [] | null, unread: number }
+  groupConversations: {}, // groupId -> { messages: [] | null, unread: number }
   callViewExpanded: true,
   pendingAutoShare: null,
+  pendingGroupContext: null, // { peerId } when creating a group from an active DM call
+  editingGroupId: null,
 };
 
 const dom = {
@@ -65,6 +74,7 @@ const dom = {
   callBarTimer: document.getElementById('call-bar-timer'),
   callBarMic: document.getElementById('call-bar-mic'),
   callBarShare: document.getElementById('call-bar-share'),
+  callBarGroup: document.getElementById('call-bar-group'),
   callBarExpand: document.getElementById('call-bar-expand'),
   callBarEnd: document.getElementById('call-bar-end'),
 
@@ -79,9 +89,31 @@ const dom = {
   incomingAccept: document.getElementById('incoming-call-accept'),
   incomingDecline: document.getElementById('incoming-call-decline'),
 
+  incomingGroupModal: document.getElementById('incoming-group-call-modal'),
+  incomingGroupAvatar: document.getElementById('incoming-group-avatar'),
+  incomingGroupName: document.getElementById('incoming-group-name'),
+  incomingGroupSub: document.getElementById('incoming-group-sub'),
+  incomingGroupAccept: document.getElementById('incoming-group-accept'),
+  incomingGroupDecline: document.getElementById('incoming-group-decline'),
+
   pickerModal: document.getElementById('screenshare-picker-modal'),
   pickerSources: document.getElementById('picker-sources'),
   pickerCancel: document.getElementById('picker-cancel'),
+
+  createGroupModal: document.getElementById('create-group-modal'),
+  createGroupName: document.getElementById('create-group-name'),
+  createGroupMax: document.getElementById('create-group-max'),
+  createGroupFriends: document.getElementById('create-group-friends'),
+  createGroupCancel: document.getElementById('create-group-cancel'),
+  createGroupConfirm: document.getElementById('create-group-confirm'),
+
+  groupSettingsModal: document.getElementById('group-settings-modal'),
+  groupSettingsAvatar: document.getElementById('group-settings-avatar'),
+  groupSettingsAvatarEdit: document.getElementById('group-settings-avatar-edit'),
+  groupSettingsName: document.getElementById('group-settings-name'),
+  groupSettingsMembers: document.getElementById('group-settings-members'),
+  groupSettingsCancel: document.getElementById('group-settings-cancel'),
+  groupSettingsSave: document.getElementById('group-settings-save'),
 };
 
 // ---------------- Icons ----------------
@@ -95,6 +127,8 @@ const ICONS = {
   expand: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>',
   collapse: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"/></svg>',
   send: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-6.5 16-2.7-6.8L4 12Z"/></svg>',
+  group: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8" r="2.8"/><path d="M3 19c0-2.8 2.5-5 5.5-5s5.5 2.2 5.5 5"/><circle cx="16.5" cy="8.5" r="2.2"/><path d="M15 14.3c2.3.3 4 2.2 4 4.7"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.15-1.4l2-1.4-1.5-2.6-2.3.8a7 7 0 0 0-2.4-1.4L14.2 3h-4.4l-.4 2.6a7 7 0 0 0-2.4 1.4l-2.3-.8-1.5 2.6 2 1.4A7 7 0 0 0 5 12c0 .5.05.9.15 1.4l-2 1.4 1.5 2.6 2.3-.8a7 7 0 0 0 2.4 1.4l.4 2.6h4.4l.4-2.6a7 7 0 0 0 2.4-1.4l2.3.8 1.5-2.6-2-1.4c.1-.5.15-.9.15-1.4Z"/></svg>',
 };
 
 // ---------------- Boot ----------------
@@ -106,6 +140,7 @@ async function boot() {
   wireOnboarding();
   wireStaticHandlers();
   callManager.onUpdate(onCallUpdate);
+  groupCallManager.onUpdate(onGroupCallUpdate);
   setInterval(tickTimers, 1000);
 
   const saved = await window.orbit.session.load();
@@ -152,7 +187,7 @@ async function submitOnboarding() {
 }
 
 // ---------------- Login ----------------
-function onLoggedIn(res) {
+async function onLoggedIn(res) {
   state.currentUser = res.user;
   state.friends = res.friends;
   state.incoming = res.incoming;
@@ -166,6 +201,12 @@ function onLoggedIn(res) {
   renderFriends();
   renderDmList();
   switchTab('friends');
+
+  try {
+    const groupsRes = await emit('groups:list');
+    state.groups = groupsRes.groups;
+    renderDmList();
+  } catch { /* ignore */ }
 }
 
 function bindRealtimeEvents() {
@@ -174,7 +215,7 @@ function bindRealtimeEvents() {
     if (friend) friend.status = status;
     renderFriends();
     renderDmList();
-    if (state.selectedPeerId === userId) renderChatHeaderIfSelected();
+    if (state.selectedType === 'dm' && state.selectedPeerId === userId) renderChatHeaderIfSelected();
   });
 
   on('friend:profile', (user) => {
@@ -182,7 +223,7 @@ function bindRealtimeEvents() {
     if (idx >= 0) state.friends[idx] = { ...state.friends[idx], ...user };
     renderFriends();
     renderDmList();
-    if (state.selectedPeerId === user.id) renderChatHeaderIfSelected();
+    if (state.selectedType === 'dm' && state.selectedPeerId === user.id) renderChatHeaderIfSelected();
   });
 
   on('friend:incoming', (fromUser) => {
@@ -207,8 +248,35 @@ function bindRealtimeEvents() {
     const conv = state.conversations[peerId] || (state.conversations[peerId] = { messages: null, unread: 0 });
     if (conv.messages === null) conv.messages = [];
     conv.messages.push(message);
-    if (state.activeTab === 'chat' && state.selectedPeerId === peerId) {
+    if (state.activeTab === 'chat' && state.selectedType === 'dm' && state.selectedPeerId === peerId) {
       renderChatMessages();
+    } else {
+      conv.unread += 1;
+    }
+    renderDmList();
+    updateNavUnreadDot();
+  });
+
+  on('group:created', (group) => {
+    if (!state.groups.some((g) => g.id === group.id)) state.groups.push(group);
+    else state.groups = state.groups.map((g) => (g.id === group.id ? group : g));
+    renderDmList();
+  });
+
+  on('group:updated', (group) => {
+    const idx = state.groups.findIndex((g) => g.id === group.id);
+    if (idx >= 0) state.groups[idx] = group; else state.groups.push(group);
+    renderDmList();
+    if (state.selectedType === 'group' && state.selectedGroupId === group.id) renderChatMain();
+  });
+
+  on('group:message:receive', (message) => {
+    const groupId = message.groupId;
+    const conv = state.groupConversations[groupId] || (state.groupConversations[groupId] = { messages: null, unread: 0 });
+    if (conv.messages === null) conv.messages = [];
+    conv.messages.push(message);
+    if (state.activeTab === 'chat' && state.selectedType === 'group' && state.selectedGroupId === groupId) {
+      renderGroupChatMessages();
     } else {
       conv.unread += 1;
     }
@@ -233,8 +301,9 @@ function switchTab(tab) {
 }
 
 function updateNavUnreadDot() {
-  const hasUnread = Object.values(state.conversations).some((c) => c.unread > 0);
-  dom.chatUnreadDot.hidden = !(hasUnread && state.activeTab !== 'chat');
+  const dmUnread = Object.values(state.conversations).some((c) => c.unread > 0);
+  const groupUnread = Object.values(state.groupConversations).some((c) => c.unread > 0);
+  dom.chatUnreadDot.hidden = !((dmUnread || groupUnread) && state.activeTab !== 'chat');
 }
 
 function wireStaticHandlers() {
@@ -304,21 +373,52 @@ function wireStaticHandlers() {
   });
   dom.chatSendBtn.addEventListener('click', sendMessage);
 
-  // Incoming call modal
+  // Incoming DM call modal
   dom.incomingAccept.addEventListener('click', () => callManager.acceptIncoming());
   dom.incomingDecline.addEventListener('click', () => callManager.declineIncoming());
 
+  // Incoming group call modal
+  dom.incomingGroupAccept.addEventListener('click', () => groupCallManager.acceptIncoming());
+  dom.incomingGroupDecline.addEventListener('click', () => groupCallManager.declineIncoming());
+
   // Call bar
-  dom.callBarMic.addEventListener('click', () => callManager.toggleMic());
-  dom.callBarShare.addEventListener('click', () => callManager.toggleScreenShare());
+  dom.callBarMic.addEventListener('click', () => activeCallManager()?.toggleMic());
+  dom.callBarShare.addEventListener('click', () => activeCallManager()?.toggleScreenShare());
+  dom.callBarGroup.addEventListener('click', () => openCreateGroupModal());
   dom.callBarExpand.addEventListener('click', () => { state.callViewExpanded = true; renderChatMain(); });
-  dom.callBarEnd.addEventListener('click', () => callManager.endCall());
+  dom.callBarEnd.addEventListener('click', () => endActiveCall());
 
   // Screen share picker
   dom.pickerCancel.addEventListener('click', () => {
     window.orbit.screenShare.choose(null);
     dom.pickerModal.hidden = true;
   });
+
+  // Create group modal
+  dom.createGroupCancel.addEventListener('click', closeCreateGroupModal);
+  dom.createGroupConfirm.addEventListener('click', confirmCreateGroup);
+
+  // Group settings modal
+  dom.groupSettingsCancel.addEventListener('click', closeGroupSettingsModal);
+  dom.groupSettingsSave.addEventListener('click', confirmGroupSettings);
+  dom.groupSettingsAvatarEdit.addEventListener('click', async () => {
+    const dataUrl = await window.orbit.avatar.pick();
+    if (!dataUrl) return;
+    dom.groupSettingsAvatar.style.cssText = `background-image:url('${dataUrl}');`;
+    dom.groupSettingsAvatar.textContent = '';
+    dom.groupSettingsAvatar.dataset.pendingIcon = dataUrl;
+  });
+}
+
+function activeCallManager() {
+  if (callManager.state !== 'idle') return callManager;
+  if (groupCallManager.state !== 'idle') return groupCallManager;
+  return null;
+}
+
+function endActiveCall() {
+  if (callManager.state !== 'idle') callManager.endCall();
+  else if (groupCallManager.state !== 'idle') groupCallManager.leaveCall();
 }
 
 // ---------------- Friends tab ----------------
@@ -462,6 +562,12 @@ function avatarInner(u) {
   return escapeHtml(initials(u.username));
 }
 
+// Groups reuse the same avatar rendering helpers as users — a group just
+// looks like { avatar: <icon>, username: <name> } to avatarStyle/avatarInner.
+function groupAsAvatarLike(group) {
+  return { avatar: group.icon, username: group.name };
+}
+
 function iconChat() {
   return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5v8c0 1.4-1.1 2.5-2.5 2.5H10l-4.5 4v-4H6.5C5.1 17 4 15.9 4 14.5v-8Z"/></svg>';
 }
@@ -480,46 +586,94 @@ function renderProfile() {
   dom.profileBioInput.value = u.statusMessage || '';
 }
 
-// ---------------- Conversas tab ----------------
+// ---------------- Conversas tab (DMs + Groups) ----------------
 function renderDmList() {
-  const rows = state.friends.map((f) => {
+  const dmRows = state.friends.map((f) => {
     const conv = state.conversations[f.id];
     const lastMsg = conv && conv.messages && conv.messages.length ? conv.messages[conv.messages.length - 1] : null;
-    return { friend: f, lastMsg, unread: conv ? conv.unread : 0 };
+    return { type: 'dm', id: f.id, entity: f, lastMsg, unread: conv ? conv.unread : 0 };
   });
+  const groupRows = state.groups.map((g) => {
+    const conv = state.groupConversations[g.id];
+    const lastMsg = conv && conv.messages && conv.messages.length ? conv.messages[conv.messages.length - 1] : null;
+    return { type: 'group', id: g.id, entity: g, lastMsg, unread: conv ? conv.unread : 0 };
+  });
+  const rows = [...dmRows, ...groupRows];
   rows.sort((a, b) => (b.lastMsg?.createdAt || 0) - (a.lastMsg?.createdAt || 0));
 
-  dom.dmListEmpty.hidden = state.friends.length > 0;
-  dom.dmListItems.innerHTML = rows.map(({ friend, lastMsg, unread }) => {
-    const preview = lastMsg
-      ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : ''}${escapeHtml(lastMsg.text)}`
-      : '<span style="color:var(--text-muted);">Diga oi!</span>';
-    const time = lastMsg ? formatDayTime(lastMsg.createdAt) : '';
-    const inCall = callManager.state !== 'idle' && callManager.peer && callManager.peer.id === friend.id;
-    return `
-    <div class="dm-row ${state.selectedPeerId === friend.id ? 'selected' : ''}" data-peer="${friend.id}">
-      <div class="dm-row-avatar">
-        <div class="avatar avatar-md" style="${avatarStyle(friend)}">${avatarInner(friend)}</div>
-        <span class="status-dot ${statusDotClass(friend.status)}"></span>
-      </div>
-      <div class="dm-row-info">
-        <div class="dm-row-name">${escapeHtml(friend.username)}</div>
-        <div class="dm-row-preview">${inCall ? '<span style="color:var(--accent);font-weight:600;">Em chamada</span>' : preview}</div>
-      </div>
-      <div class="dm-row-meta">
-        <div class="dm-row-time">${time}</div>
-        ${unread > 0 ? `<div class="dm-row-unread">${unread}</div>` : ''}
-      </div>
-    </div>`;
+  dom.dmListEmpty.hidden = rows.length > 0;
+  dom.dmListItems.innerHTML = rows.map((row) => {
+    if (row.type === 'dm') return dmRowHtml(row);
+    return groupRowHtml(row);
   }).join('');
 
   dom.dmListItems.querySelectorAll('[data-peer]').forEach((rowEl) => {
     rowEl.addEventListener('click', () => selectConversation(rowEl.dataset.peer));
   });
+  dom.dmListItems.querySelectorAll('[data-group]').forEach((rowEl) => {
+    rowEl.addEventListener('click', () => selectGroupConversation(rowEl.dataset.group));
+  });
+}
+
+function dmRowHtml({ id, entity: friend, lastMsg, unread }) {
+  const preview = lastMsg
+    ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : ''}${escapeHtml(lastMsg.text)}`
+    : '<span style="color:var(--text-muted);">Diga oi!</span>';
+  const time = lastMsg ? formatDayTime(lastMsg.createdAt) : '';
+  const inCall = callManager.state !== 'idle' && callManager.peer && callManager.peer.id === friend.id;
+  const selected = state.selectedType === 'dm' && state.selectedPeerId === id;
+  return `
+  <div class="dm-row ${selected ? 'selected' : ''}" data-peer="${id}">
+    <div class="dm-row-avatar">
+      <div class="avatar avatar-md" style="${avatarStyle(friend)}">${avatarInner(friend)}</div>
+      <span class="status-dot ${statusDotClass(friend.status)}"></span>
+    </div>
+    <div class="dm-row-info">
+      <div class="dm-row-name">${escapeHtml(friend.username)}</div>
+      <div class="dm-row-preview">${inCall ? '<span style="color:var(--accent);font-weight:600;">Em chamada</span>' : preview}</div>
+    </div>
+    <div class="dm-row-meta">
+      <div class="dm-row-time">${time}</div>
+      ${unread > 0 ? `<div class="dm-row-unread">${unread}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function groupRowHtml({ id, entity: group, lastMsg, unread }) {
+  const senderName = lastMsg ? memberName(group, lastMsg.from) : '';
+  const preview = lastMsg
+    ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : `${escapeHtml(senderName)}: `}${escapeHtml(lastMsg.text)}`
+    : `<span style="color:var(--text-muted);">${group.members.length} membros</span>`;
+  const time = lastMsg ? formatDayTime(lastMsg.createdAt) : '';
+  const inCall = groupCallManager.state !== 'idle' && groupCallManager.groupId === id;
+  const selected = state.selectedType === 'group' && state.selectedGroupId === id;
+  const groupLike = groupAsAvatarLike(group);
+  return `
+  <div class="dm-row ${selected ? 'selected' : ''}" data-group="${id}">
+    <div class="dm-row-avatar">
+      <div class="avatar avatar-md" style="${avatarStyle(groupLike)}">${avatarInner(groupLike)}</div>
+    </div>
+    <div class="dm-row-info">
+      <div class="dm-row-name">${escapeHtml(group.name)}</div>
+      <div class="dm-row-preview">${inCall ? '<span style="color:var(--accent);font-weight:600;">Em chamada</span>' : preview}</div>
+    </div>
+    <div class="dm-row-meta">
+      <div class="dm-row-time">${time}</div>
+      ${unread > 0 ? `<div class="dm-row-unread">${unread}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function memberName(group, userId) {
+  if (userId === state.currentUser.id) return 'Você';
+  const member = group.members.find((m) => m.id === userId);
+  return member ? member.username : 'Alguém';
 }
 
 async function selectConversation(peerId) {
+  state.selectedType = 'dm';
   state.selectedPeerId = peerId;
+  state.selectedGroupId = null;
   const conv = state.conversations[peerId] || (state.conversations[peerId] = { messages: null, unread: 0 });
   if (conv.messages === null) {
     try {
@@ -535,50 +689,79 @@ async function selectConversation(peerId) {
   renderChatMain();
 }
 
+async function selectGroupConversation(groupId) {
+  state.selectedType = 'group';
+  state.selectedGroupId = groupId;
+  state.selectedPeerId = null;
+  const conv = state.groupConversations[groupId] || (state.groupConversations[groupId] = { messages: null, unread: 0 });
+  if (conv.messages === null) {
+    try {
+      const res = await emit('group:messages:history', { groupId });
+      conv.messages = res.messages;
+    } catch {
+      conv.messages = [];
+    }
+  }
+  conv.unread = 0;
+  renderDmList();
+  updateNavUnreadDot();
+  renderChatMain();
+}
+
 function renderChatHeaderIfSelected() {
-  if (state.activeTab === 'chat' && state.selectedPeerId && !isCallViewShowing()) renderChatMain();
+  if (state.activeTab === 'chat' && state.selectedType && !isCallViewShowing()) renderChatMain();
 }
 
 function isCallViewShowing() {
-  return callManager.state !== 'idle' && state.callViewExpanded;
+  return activeCallManager() !== null && state.callViewExpanded;
 }
 
 function currentFriend(peerId) {
   return state.friends.find((f) => f.id === peerId) || null;
 }
 
+function currentGroup(groupId) {
+  return state.groups.find((g) => g.id === groupId) || null;
+}
+
 function renderChatMain() {
-  const callActive = callManager.state !== 'idle';
+  const cm = activeCallManager();
+  const callActive = cm !== null;
   dom.callBar.hidden = !callActive;
-  if (callActive) renderCallBar();
+  if (callActive) renderCallBar(cm);
 
   if (callActive && state.callViewExpanded) {
     dom.chatEmpty.hidden = true;
     dom.chatTextView.hidden = true;
     dom.callView.hidden = false;
-    renderCallView();
+    if (cm === callManager) renderCallView(); else renderGroupCallView();
     return;
   }
 
   dom.callView.hidden = true;
 
-  if (!state.selectedPeerId) {
-    dom.chatEmpty.hidden = false;
-    dom.chatTextView.hidden = true;
+  if (state.selectedType === 'group') {
+    const group = currentGroup(state.selectedGroupId);
+    if (!group) { dom.chatEmpty.hidden = false; dom.chatTextView.hidden = true; return; }
+    dom.chatEmpty.hidden = true;
+    dom.chatTextView.hidden = false;
+    renderGroupChatHeader(group);
+    renderGroupChatMessages();
     return;
   }
 
-  const friend = currentFriend(state.selectedPeerId);
-  if (!friend) {
-    dom.chatEmpty.hidden = false;
-    dom.chatTextView.hidden = true;
+  if (state.selectedType === 'dm') {
+    const friend = currentFriend(state.selectedPeerId);
+    if (!friend) { dom.chatEmpty.hidden = false; dom.chatTextView.hidden = true; return; }
+    dom.chatEmpty.hidden = true;
+    dom.chatTextView.hidden = false;
+    renderChatHeader(friend);
+    renderChatMessages();
     return;
   }
 
-  dom.chatEmpty.hidden = true;
-  dom.chatTextView.hidden = false;
-  renderChatHeader(friend);
-  renderChatMessages();
+  dom.chatEmpty.hidden = false;
+  dom.chatTextView.hidden = true;
 }
 
 function renderChatHeader(friend) {
@@ -607,13 +790,37 @@ function renderChatHeader(friend) {
   }
 }
 
+function renderGroupChatHeader(group) {
+  const groupLike = groupAsAvatarLike(group);
+  const inCallWithGroup = groupCallManager.state !== 'idle' && groupCallManager.groupId === group.id;
+  dom.chatHeader.innerHTML = `
+    <div class="chat-header-user">
+      <div class="chat-header-avatar">
+        <div class="avatar avatar-sm" style="${avatarStyle(groupLike)}">${avatarInner(groupLike)}</div>
+      </div>
+      <div>
+        <div class="chat-header-name">${escapeHtml(group.name)}</div>
+        <div class="chat-header-status">${group.members.length} membros</div>
+      </div>
+    </div>
+    <div class="chat-header-actions">
+      <button class="icon-btn" id="chat-group-call-btn" title="Chamada de voz">${ICONS.phone}</button>
+      <button class="icon-btn" id="chat-group-share-btn" title="Compartilhar tela">${ICONS.monitor}</button>
+      <button class="icon-btn" id="chat-group-settings-btn" title="Configurações do grupo">${ICONS.gear}</button>
+    </div>`;
+
+  document.getElementById('chat-group-call-btn').addEventListener('click', () => requestGroupCall(group));
+  document.getElementById('chat-group-share-btn').addEventListener('click', () => requestGroupScreenShare(group));
+  document.getElementById('chat-group-settings-btn').addEventListener('click', () => openGroupSettingsModal(group));
+
+  if (inCallWithGroup) document.getElementById('chat-group-call-btn').classList.add('active');
+}
+
 function requestCall(friend) {
+  if (groupCallManager.state !== 'idle') { toast('Você já está em uma chamada em grupo'); return; }
   if (callManager.state !== 'idle') {
     if (callManager.peer && callManager.peer.id === friend.id) {
       state.callViewExpanded = true;
-      // That friend already called us (we're ringing) or the call is already
-      // under way — clicking "call" here just joins it instead of trying to
-      // place a second, redundant invite.
       if (callManager.state === 'ringing') callManager.acceptIncoming();
       else renderChatMain();
     } else {
@@ -631,13 +838,33 @@ function requestScreenShare(friend) {
     callManager.toggleScreenShare();
     return;
   }
-  if (callManager.state !== 'idle') {
+  if (callManager.state !== 'idle' || groupCallManager.state !== 'idle') {
     toast('Você já está em uma chamada');
     return;
   }
   state.pendingAutoShare = friend.id;
   state.callViewExpanded = true;
   callManager.startCall(friend);
+}
+
+function requestGroupCall(group) {
+  if (callManager.state !== 'idle') { toast('Encerre a chamada atual primeiro'); return; }
+  if (groupCallManager.state !== 'idle') {
+    if (groupCallManager.groupId === group.id) { state.callViewExpanded = true; renderChatMain(); }
+    else toast('Você já está em uma chamada em grupo');
+    return;
+  }
+  state.callViewExpanded = true;
+  groupCallManager.startGroupCall(group);
+}
+
+function requestGroupScreenShare(group) {
+  if (groupCallManager.state === 'connected' && groupCallManager.groupId === group.id) {
+    state.callViewExpanded = true;
+    groupCallManager.toggleScreenShare();
+    return;
+  }
+  requestGroupCall(group);
 }
 
 // ---------------- Messages ----------------
@@ -662,11 +889,49 @@ function renderChatMessages() {
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 }
 
+function renderGroupChatMessages() {
+  const group = currentGroup(state.selectedGroupId);
+  const conv = state.groupConversations[state.selectedGroupId];
+  const messages = (conv && conv.messages) || [];
+  dom.chatMessages.innerHTML = messages.map((m) => {
+    const mine = m.from === state.currentUser.id;
+    if (mine) {
+      return `<div class="msg-row msg-row-out"><div class="msg-bubble-out">${escapeHtml(m.text)}</div></div>`;
+    }
+    const sender = group ? group.members.find((mem) => mem.id === m.from) : null;
+    return `
+      <div class="msg-row">
+        <div class="avatar msg-avatar" style="${sender ? avatarStyle(sender) : ''}">${sender ? avatarInner(sender) : ''}</div>
+        <div class="msg-body">
+          <div class="msg-meta"><span class="msg-author">${escapeHtml(sender ? sender.username : 'Alguém')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
+          <div class="msg-text">${escapeHtml(m.text)}</div>
+        </div>
+      </div>`;
+  }).join('');
+  dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+}
+
 async function sendMessage() {
   const text = dom.chatInput.value.trim();
-  if (!text || !state.selectedPeerId) return;
+  if (!text || !state.selectedType) return;
   dom.chatInput.value = '';
   dom.chatInput.style.height = 'auto';
+
+  if (state.selectedType === 'group') {
+    const groupId = state.selectedGroupId;
+    try {
+      const res = await emit('group:message:send', { groupId, text });
+      const conv = state.groupConversations[groupId] || (state.groupConversations[groupId] = { messages: [], unread: 0 });
+      if (conv.messages === null) conv.messages = [];
+      conv.messages.push(res.message);
+      renderGroupChatMessages();
+      renderDmList();
+    } catch {
+      toast('Não foi possível enviar a mensagem', 'err');
+    }
+    return;
+  }
+
   try {
     const res = await emit('message:send', { to: state.selectedPeerId, text });
     const conv = state.conversations[state.selectedPeerId] || (state.conversations[state.selectedPeerId] = { messages: [], unread: 0 });
@@ -679,7 +944,7 @@ async function sendMessage() {
   }
 }
 
-// ---------------- Call UI ----------------
+// ---------------- DM call UI ----------------
 function onCallUpdate(cm) {
   if (cm.state === 'connected' && state.pendingAutoShare && cm.peer && cm.peer.id === state.pendingAutoShare) {
     state.pendingAutoShare = null;
@@ -702,11 +967,36 @@ function renderIncomingModal() {
   dom.incomingName.textContent = `${peer.username}#${peer.tag}`;
 }
 
-function renderCallBar() {
-  const cm = callManager;
-  const peer = cm.peer;
-  const label = cm.state === 'calling' ? 'Chamando...' : (cm.state === 'connected' ? (peer ? peer.username : '') : '');
-  dom.callBarTitle.textContent = peer ? `${label || peer.username}` : 'Chamada';
+// ---------------- Group call UI ----------------
+function onGroupCallUpdate() {
+  renderIncomingGroupModal();
+  renderChatMain();
+  renderDmList();
+}
+
+function renderIncomingGroupModal() {
+  const ringing = groupCallManager.state === 'ringing';
+  dom.incomingGroupModal.hidden = !ringing;
+  if (!ringing || !groupCallManager.group) return;
+  const groupLike = groupAsAvatarLike(groupCallManager.group);
+  dom.incomingGroupAvatar.style.cssText = avatarStyle(groupLike);
+  dom.incomingGroupAvatar.textContent = avatarInner(groupLike);
+  dom.incomingGroupName.textContent = groupCallManager.group.name;
+  const fromName = groupCallManager.ringingFrom ? groupCallManager.ringingFrom.username : 'Alguém';
+  dom.incomingGroupSub.textContent = `${fromName} iniciou uma chamada em grupo`;
+}
+
+function renderCallBar(cm) {
+  const isGroup = cm === groupCallManager;
+  let title = 'Chamada';
+  if (isGroup) {
+    title = cm.group ? cm.group.name : 'Chamada em grupo';
+  } else {
+    const peer = cm.peer;
+    const label = cm.state === 'calling' ? 'Chamando...' : (peer ? peer.username : '');
+    title = peer ? (label || peer.username) : 'Chamada';
+  }
+  dom.callBarTitle.textContent = title;
   dom.callBarTimer.textContent = cm.state === 'connected' ? formatDuration(cm.elapsedSeconds()) : '';
   dom.callBarMic.innerHTML = cm.micMuted ? ICONS.micOff : ICONS.mic;
   dom.callBarMic.classList.toggle('active', !cm.micMuted && cm.state === 'connected');
@@ -714,6 +1004,11 @@ function renderCallBar() {
   dom.callBarShare.classList.toggle('active', cm.sharingLocal);
   dom.callBarShare.style.display = cm.state === 'connected' ? '' : 'none';
   dom.callBarMic.style.display = cm.state === 'connected' ? '' : 'none';
+  // Escalating to a group only makes sense from a 1:1 call, and only while
+  // there's still room to add people.
+  const canEscalate = !isGroup && cm.state === 'connected';
+  dom.callBarGroup.innerHTML = ICONS.group;
+  dom.callBarGroup.style.display = canEscalate ? '' : 'none';
   dom.callBarExpand.innerHTML = state.callViewExpanded ? ICONS.collapse : ICONS.expand;
   dom.callBarExpand.onclick = () => { state.callViewExpanded = !state.callViewExpanded; renderChatMain(); };
   dom.callBarEnd.innerHTML = ICONS.phoneEnd;
@@ -724,7 +1019,6 @@ function renderCallView() {
   const peer = cm.peer;
   if (!peer) return;
 
-  const statusText = cm.state === 'calling' ? 'Chamando...' : (cm.state === 'connected' ? formatDuration(cm.elapsedSeconds()) : '');
   const isSharing = cm.sharingLocal || cm.remoteSharing;
 
   dom.callViewHeader.innerHTML = `
@@ -776,6 +1070,7 @@ function renderCallView() {
         <button class="call-control-btn ${!cm.micMuted ? '' : 'active'}" id="cv-mic" title="Mudo">${cm.micMuted ? ICONS.micOff : ICONS.mic}</button>
         <button class="call-control-btn ${cm.deafened ? 'active' : ''}" id="cv-deafen" title="Ensurdecer">${ICONS.headphones}</button>
         <button class="call-control-btn ${cm.sharingLocal ? 'active' : ''}" id="cv-share" title="Compartilhar tela">${ICONS.monitor}</button>
+        <button class="call-control-btn" id="cv-group" title="Adicionar ao grupo">${ICONS.group}</button>
         <div class="call-control-divider"></div>
       ` : ''}
       <button class="call-control-btn call-control-end" id="cv-end" title="${cm.state === 'calling' ? 'Cancelar' : 'Encerrar'}">${ICONS.phoneEnd}</button>
@@ -786,12 +1081,80 @@ function renderCallView() {
       document.getElementById('cv-mic').addEventListener('click', () => cm.toggleMic());
       document.getElementById('cv-deafen').addEventListener('click', () => cm.toggleDeafen());
       document.getElementById('cv-share').addEventListener('click', () => cm.toggleScreenShare());
+      document.getElementById('cv-group').addEventListener('click', () => openCreateGroupModal());
     }
     document.getElementById('cv-end').addEventListener('click', () => {
       if (cm.state === 'calling') cm.cancelOutgoing();
       else cm.endCall();
     });
   }
+}
+
+function renderGroupCallView() {
+  const cm = groupCallManager;
+  if (!cm.group) return;
+  const participants = cm.participantList();
+  const sharer = participants.find((p) => p.remoteSharing);
+  const isSharing = cm.sharingLocal || !!sharer;
+
+  dom.callViewHeader.innerHTML = `
+    <div>
+      <div class="call-view-title">${isSharing ? 'Compartilhamento de tela' : 'Chamada em grupo'} — ${escapeHtml(cm.group.name)}</div>
+      <div class="call-view-sub">${participants.length + 1} participante${participants.length === 0 ? '' : 's'}</div>
+    </div>
+    <div class="call-view-timer">${formatDuration(cm.elapsedSeconds())}</div>`;
+
+  if (isSharing) {
+    const sharerName = sharer ? (sharer.user.username || 'Alguém') : 'Você';
+    dom.callViewBody.innerHTML = `
+      <div class="screenshare-panel">
+        <div class="screenshare-stage">
+          <div class="screenshare-label">${sharer ? `${escapeHtml(sharerName)} está compartilhando a tela` : 'Você está compartilhando sua tela'}</div>
+          <video id="screenshare-video" autoplay playsinline></video>
+        </div>
+        <div class="screenshare-strip">
+          <div class="screenshare-thumb">
+            <div class="avatar avatar-sm" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
+            <div class="screenshare-thumb-name">Você</div>
+          </div>
+          ${participants.map((p) => `
+            <div class="screenshare-thumb">
+              <div class="avatar avatar-sm" style="${avatarStyle(p.user)}">${avatarInner(p.user)}</div>
+              <div class="screenshare-thumb-name">${escapeHtml(p.user.username || '')}</div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    const videoEl = document.getElementById('screenshare-video');
+    const stream = sharer ? sharer.remoteScreenStream : cm.localScreenStream;
+    if (videoEl && stream) videoEl.srcObject = stream;
+  } else {
+    const selfTile = `
+      <div class="participant-tile">
+        <div class="avatar avatar-lg" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
+        <div class="participant-tile-name">Você</div>
+        <div class="participant-mic-badge ${cm.micMuted ? 'muted' : ''}">${cm.micMuted ? ICONS.micOff : ICONS.mic}</div>
+      </div>`;
+    const peerTiles = participants.map((p) => `
+      <div class="participant-tile">
+        <div class="avatar avatar-lg" style="${avatarStyle(p.user)}">${avatarInner(p.user)}</div>
+        <div class="participant-tile-name">${escapeHtml(p.user.username || '')}</div>
+      </div>`).join('');
+    dom.callViewBody.innerHTML = selfTile + peerTiles;
+  }
+
+  dom.callViewControls.innerHTML = `
+    <div class="call-controls-pill">
+      <button class="call-control-btn ${!cm.micMuted ? '' : 'active'}" id="cv-mic" title="Mudo">${cm.micMuted ? ICONS.micOff : ICONS.mic}</button>
+      <button class="call-control-btn ${cm.deafened ? 'active' : ''}" id="cv-deafen" title="Ensurdecer">${ICONS.headphones}</button>
+      <button class="call-control-btn ${cm.sharingLocal ? 'active' : ''}" id="cv-share" title="Compartilhar tela">${ICONS.monitor}</button>
+      <div class="call-control-divider"></div>
+      <button class="call-control-btn call-control-end" id="cv-end" title="Sair da chamada">${ICONS.phoneEnd}</button>
+    </div>`;
+
+  document.getElementById('cv-mic').addEventListener('click', () => cm.toggleMic());
+  document.getElementById('cv-deafen').addEventListener('click', () => cm.toggleDeafen());
+  document.getElementById('cv-share').addEventListener('click', () => cm.toggleScreenShare());
+  document.getElementById('cv-end').addEventListener('click', () => cm.leaveCall());
 }
 
 function formatDuration(totalSeconds) {
@@ -801,11 +1164,12 @@ function formatDuration(totalSeconds) {
 }
 
 function tickTimers() {
-  if (callManager.state !== 'connected') return;
-  if (!dom.callBar.hidden) dom.callBarTimer.textContent = formatDuration(callManager.elapsedSeconds());
+  const cm = activeCallManager();
+  if (!cm || cm.state !== 'connected') return;
+  if (!dom.callBar.hidden) dom.callBarTimer.textContent = formatDuration(cm.elapsedSeconds());
   if (!dom.callView.hidden) {
     const timerEl = dom.callViewHeader.querySelector('.call-view-timer');
-    if (timerEl) timerEl.textContent = formatDuration(callManager.elapsedSeconds());
+    if (timerEl) timerEl.textContent = formatDuration(cm.elapsedSeconds());
   }
 }
 
@@ -823,4 +1187,104 @@ function showScreenSharePicker(sources) {
     });
   });
   dom.pickerModal.hidden = false;
+}
+
+// ---------------- Create group modal (escalating a 1:1 call) ----------------
+function openCreateGroupModal() {
+  if (callManager.state === 'idle' || !callManager.peer) return;
+  const peer = callManager.peer;
+  state.pendingGroupContext = { peerId: peer.id };
+  const maxSelectable = MAX_GROUP_MEMBERS - 2; // self + current peer already count
+  dom.createGroupMax.textContent = String(maxSelectable);
+  dom.createGroupName.value = '';
+  const selectable = state.friends.filter((f) => f.id !== peer.id);
+  dom.createGroupFriends.innerHTML = selectable.map((f) => `
+    <div class="group-member-row" data-friend="${f.id}">
+      <span class="group-member-checkbox"></span>
+      <div class="avatar avatar-sm" style="${avatarStyle(f)}">${avatarInner(f)}</div>
+      <span class="group-member-name">${escapeHtml(f.username)}<span class="group-member-tag">#${f.tag}</span></span>
+    </div>`).join('') || '<p style="color:var(--text-muted);font-size:13px;">Você não tem outros amigos para adicionar ainda.</p>';
+
+  dom.createGroupFriends.querySelectorAll('[data-friend]').forEach((row) => {
+    row.addEventListener('click', () => {
+      const checkedCount = dom.createGroupFriends.querySelectorAll('.checked').length;
+      const isChecked = row.classList.contains('checked');
+      if (!isChecked && checkedCount >= maxSelectable) {
+        toast(`Você pode adicionar até ${maxSelectable} pessoas além de vocês dois`);
+        return;
+      }
+      row.classList.toggle('checked');
+    });
+  });
+
+  dom.createGroupModal.hidden = false;
+}
+
+function closeCreateGroupModal() {
+  dom.createGroupModal.hidden = true;
+  state.pendingGroupContext = null;
+}
+
+async function confirmCreateGroup() {
+  if (!state.pendingGroupContext) return;
+  const { peerId } = state.pendingGroupContext;
+  const selectedIds = [...dom.createGroupFriends.querySelectorAll('.checked')].map((row) => row.dataset.friend);
+  const name = dom.createGroupName.value.trim();
+  const memberIds = [peerId, ...selectedIds];
+
+  try {
+    const res = await emit('group:create', { name, memberIds });
+    dom.createGroupModal.hidden = true;
+    state.pendingGroupContext = null;
+    if (!state.groups.some((g) => g.id === res.group.id)) state.groups.push(res.group);
+
+    callManager.endCall();
+    switchTab('chat');
+    state.callViewExpanded = true;
+    selectGroupConversation(res.group.id);
+    groupCallManager.startGroupCall(res.group);
+  } catch {
+    toast('Não foi possível criar o grupo', 'err');
+  }
+}
+
+// ---------------- Group settings modal ----------------
+function openGroupSettingsModal(group) {
+  state.editingGroupId = group.id;
+  const groupLike = groupAsAvatarLike(group);
+  dom.groupSettingsAvatar.style.cssText = avatarStyle(groupLike);
+  dom.groupSettingsAvatar.textContent = avatarInner(groupLike);
+  delete dom.groupSettingsAvatar.dataset.pendingIcon;
+  dom.groupSettingsName.value = group.name;
+  dom.groupSettingsMembers.innerHTML = group.members.map((m) => `
+    <div class="group-member-row locked">
+      <div class="avatar avatar-sm" style="${avatarStyle(m)}">${avatarInner(m)}</div>
+      <span class="group-member-name">${escapeHtml(m.username)}<span class="group-member-tag">#${m.tag}</span></span>
+    </div>`).join('');
+  dom.groupSettingsModal.hidden = false;
+}
+
+function closeGroupSettingsModal() {
+  dom.groupSettingsModal.hidden = true;
+  state.editingGroupId = null;
+}
+
+async function confirmGroupSettings() {
+  if (!state.editingGroupId) return;
+  const name = dom.groupSettingsName.value.trim();
+  if (!name) { toast('O nome do grupo não pode ficar vazio', 'err'); return; }
+  const patch = { groupId: state.editingGroupId, name };
+  const pendingIcon = dom.groupSettingsAvatar.dataset.pendingIcon;
+  if (pendingIcon) patch.icon = { type: 'image', dataUrl: pendingIcon };
+  try {
+    const res = await emit('group:update', patch);
+    const idx = state.groups.findIndex((g) => g.id === res.group.id);
+    if (idx >= 0) state.groups[idx] = res.group;
+    closeGroupSettingsModal();
+    renderDmList();
+    if (state.selectedType === 'group' && state.selectedGroupId === res.group.id) renderChatMain();
+    toast('Grupo atualizado', 'ok');
+  } catch {
+    toast('Não foi possível atualizar o grupo', 'err');
+  }
 }
