@@ -151,6 +151,9 @@
       <div class="dm-list">
         <div class="dm-list-header">
           <div class="dm-list-title">Conversas</div>
+          <button id="dm-new-group-btn" class="icon-btn" title="Criar grupo">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8" r="2.8"/><path d="M3 19c0-2.8 2.5-5 5.5-5s5.5 2.2 5.5 5"/><circle cx="16.5" cy="8.5" r="2.2"/><path d="M15 14.3c2.3.3 4 2.2 4 4.7"/></svg>
+          </button>
         </div>
         <div id="dm-list-items"></div>
         <div id="dm-list-empty" class="empty-state" hidden>
@@ -271,6 +274,10 @@
       <input id="group-settings-name" class="text-input" type="text" maxlength="40" style="margin-bottom:16px;">
       <div class="field-label">Membros</div>
       <div id="group-settings-members" class="group-member-list" style="margin-bottom:16px;"></div>
+      <div id="group-settings-add-section" hidden>
+        <div class="field-label">Adicionar membros (até <span id="group-settings-add-max">0</span>)</div>
+        <div id="group-settings-add-friends" class="group-member-list" style="margin-bottom:16px;"></div>
+      </div>
       <div style="display:flex; gap:10px;">
         <button id="group-settings-cancel" class="btn btn-ghost" style="flex:1;">Cancelar</button>
         <button id="group-settings-save" class="btn btn-primary" style="flex:1;">Salvar</button>

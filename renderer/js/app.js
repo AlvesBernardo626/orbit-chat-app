@@ -61,6 +61,7 @@ const dom = {
 
   dmListItems: document.getElementById('dm-list-items'),
   dmListEmpty: document.getElementById('dm-list-empty'),
+  dmNewGroupBtn: document.getElementById('dm-new-group-btn'),
   chatMain: document.getElementById('chat-main'),
   chatEmpty: document.getElementById('chat-empty'),
   chatTextView: document.getElementById('chat-text-view'),
@@ -112,6 +113,9 @@ const dom = {
   groupSettingsAvatarEdit: document.getElementById('group-settings-avatar-edit'),
   groupSettingsName: document.getElementById('group-settings-name'),
   groupSettingsMembers: document.getElementById('group-settings-members'),
+  groupSettingsAddSection: document.getElementById('group-settings-add-section'),
+  groupSettingsAddMax: document.getElementById('group-settings-add-max'),
+  groupSettingsAddFriends: document.getElementById('group-settings-add-friends'),
   groupSettingsCancel: document.getElementById('group-settings-cancel'),
   groupSettingsSave: document.getElementById('group-settings-save'),
 };
@@ -372,6 +376,9 @@ function wireStaticHandlers() {
     dom.chatInput.style.height = `${Math.min(dom.chatInput.scrollHeight, 120)}px`;
   });
   dom.chatSendBtn.addEventListener('click', sendMessage);
+
+  // Conversas: start a group directly, without needing an active call
+  dom.dmNewGroupBtn.addEventListener('click', () => openCreateGroupModal());
 
   // Incoming DM call modal
   dom.incomingAccept.addEventListener('click', () => callManager.acceptIncoming());
@@ -1189,15 +1196,16 @@ function showScreenSharePicker(sources) {
   dom.pickerModal.hidden = false;
 }
 
-// ---------------- Create group modal (escalating a 1:1 call) ----------------
+// ---------------- Create group modal ----------------
+// Reachable two ways: escalating an active 1:1 call (peer is pre-selected
+// and locked), or directly from the Conversas header (pick everyone freely).
 function openCreateGroupModal() {
-  if (callManager.state === 'idle' || !callManager.peer) return;
-  const peer = callManager.peer;
-  state.pendingGroupContext = { peerId: peer.id };
-  const maxSelectable = MAX_GROUP_MEMBERS - 2; // self + current peer already count
+  const peer = callManager.state !== 'idle' ? callManager.peer : null;
+  state.pendingGroupContext = { peerId: peer ? peer.id : null };
+  const maxSelectable = MAX_GROUP_MEMBERS - (peer ? 2 : 1); // self (+ locked call peer, if any) already count
   dom.createGroupMax.textContent = String(maxSelectable);
   dom.createGroupName.value = '';
-  const selectable = state.friends.filter((f) => f.id !== peer.id);
+  const selectable = state.friends.filter((f) => !peer || f.id !== peer.id);
   dom.createGroupFriends.innerHTML = selectable.map((f) => `
     <div class="group-member-row" data-friend="${f.id}">
       <span class="group-member-checkbox"></span>
@@ -1230,7 +1238,12 @@ async function confirmCreateGroup() {
   const { peerId } = state.pendingGroupContext;
   const selectedIds = [...dom.createGroupFriends.querySelectorAll('.checked')].map((row) => row.dataset.friend);
   const name = dom.createGroupName.value.trim();
-  const memberIds = [peerId, ...selectedIds];
+  const memberIds = peerId ? [peerId, ...selectedIds] : selectedIds;
+
+  if (memberIds.length === 0) {
+    toast('Escolha pelo menos um amigo para o grupo', 'err');
+    return;
+  }
 
   try {
     const res = await emit('group:create', { name, memberIds });
@@ -1238,11 +1251,17 @@ async function confirmCreateGroup() {
     state.pendingGroupContext = null;
     if (!state.groups.some((g) => g.id === res.group.id)) state.groups.push(res.group);
 
-    callManager.endCall();
     switchTab('chat');
-    state.callViewExpanded = true;
     selectGroupConversation(res.group.id);
-    groupCallManager.startGroupCall(res.group);
+
+    // Only auto-join a group call when the group was created by escalating
+    // an existing 1:1 call — a group started fresh from Conversas is just a
+    // new conversation until someone chooses to call it.
+    if (peerId && callManager.state !== 'idle') {
+      callManager.endCall();
+      state.callViewExpanded = true;
+      groupCallManager.startGroupCall(res.group);
+    }
   } catch {
     toast('Não foi possível criar o grupo', 'err');
   }
@@ -1261,6 +1280,36 @@ function openGroupSettingsModal(group) {
       <div class="avatar avatar-sm" style="${avatarStyle(m)}">${avatarInner(m)}</div>
       <span class="group-member-name">${escapeHtml(m.username)}<span class="group-member-tag">#${m.tag}</span></span>
     </div>`).join('');
+
+  const memberIds = new Set(group.members.map((m) => m.id));
+  const addable = state.friends.filter((f) => !memberIds.has(f.id));
+  const roomLeft = MAX_GROUP_MEMBERS - group.members.length;
+
+  if (roomLeft > 0 && addable.length > 0) {
+    dom.groupSettingsAddSection.hidden = false;
+    dom.groupSettingsAddMax.textContent = String(roomLeft);
+    dom.groupSettingsAddFriends.innerHTML = addable.map((f) => `
+      <div class="group-member-row" data-friend="${f.id}">
+        <span class="group-member-checkbox"></span>
+        <div class="avatar avatar-sm" style="${avatarStyle(f)}">${avatarInner(f)}</div>
+        <span class="group-member-name">${escapeHtml(f.username)}<span class="group-member-tag">#${f.tag}</span></span>
+      </div>`).join('');
+    dom.groupSettingsAddFriends.querySelectorAll('[data-friend]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const checkedCount = dom.groupSettingsAddFriends.querySelectorAll('.checked').length;
+        const isChecked = row.classList.contains('checked');
+        if (!isChecked && checkedCount >= roomLeft) {
+          toast(`Só há espaço para mais ${roomLeft} pessoa${roomLeft === 1 ? '' : 's'}`);
+          return;
+        }
+        row.classList.toggle('checked');
+      });
+    });
+  } else {
+    dom.groupSettingsAddSection.hidden = true;
+    dom.groupSettingsAddFriends.innerHTML = '';
+  }
+
   dom.groupSettingsModal.hidden = false;
 }
 
@@ -1273,13 +1322,18 @@ async function confirmGroupSettings() {
   if (!state.editingGroupId) return;
   const name = dom.groupSettingsName.value.trim();
   if (!name) { toast('O nome do grupo não pode ficar vazio', 'err'); return; }
-  const patch = { groupId: state.editingGroupId, name };
+  const groupId = state.editingGroupId;
+  const patch = { groupId, name };
   const pendingIcon = dom.groupSettingsAvatar.dataset.pendingIcon;
   if (pendingIcon) patch.icon = { type: 'image', dataUrl: pendingIcon };
+  const newMemberIds = [...dom.groupSettingsAddFriends.querySelectorAll('.checked')].map((row) => row.dataset.friend);
   try {
-    const res = await emit('group:update', patch);
+    let res = await emit('group:update', patch);
+    if (newMemberIds.length > 0) {
+      res = await emit('group:add-members', { groupId, memberIds: newMemberIds });
+    }
     const idx = state.groups.findIndex((g) => g.id === res.group.id);
-    if (idx >= 0) state.groups[idx] = res.group;
+    if (idx >= 0) state.groups[idx] = res.group; else state.groups.push(res.group);
     closeGroupSettingsModal();
     renderDmList();
     if (state.selectedType === 'group' && state.selectedGroupId === res.group.id) renderChatMain();

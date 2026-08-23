@@ -141,8 +141,11 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       const result = db.createFriendRequest(currentUserId, String(username || ''), String(tag || ''));
       if (result.error) return ack && ack({ error: result.error });
       const fromUser = db.getUserById(currentUserId);
-      io.to(`user:${result.target.id}`).emit('friend:incoming', publicUser(fromUser));
-      ack && ack({ ok: true, target: publicUser(result.target) });
+      // Both sides need friendshipId attached so their Accept/Decline/Cancel
+      // buttons work immediately — db.getUserById() doesn't carry it (only
+      // listPendingIncoming/Outgoing do), so it must be added by hand here.
+      io.to(`user:${result.target.id}`).emit('friend:incoming', { ...publicUser(fromUser), friendshipId: result.friendship.id });
+      ack && ack({ ok: true, target: { ...publicUser(result.target), friendshipId: result.friendship.id } });
     });
 
     socket.on('friend:respond', ({ friendshipId, accept }, ack) => {
