@@ -1,10 +1,10 @@
 const PORT = 4732;
 
-// Local dev default: the embedded local server. For the build that goes out
-// to friends, this gets swapped to the hosted server's https:// URL before
-// running `npm run dist` (see BUILD.md) — every copy of the app then talks
-// to that one shared server instead of trying to host its own.
-const SERVER_URL = `http://localhost:${PORT}`;
+// Points at the hosted signaling server (see BUILD.md) so every friend's
+// copy of the distributed .exe talks to that one shared server instead of
+// trying to host its own. Set back to `http://localhost:${PORT}` for local
+// dev against the embedded server.
+const SERVER_URL = 'https://orbit-signaling.onrender.com';
 
 const IS_REMOTE_SERVER = !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(SERVER_URL);
 

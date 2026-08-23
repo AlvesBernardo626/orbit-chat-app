@@ -25,6 +25,7 @@
   "build": {
     "appId": "com.orbit.chat",
     "productName": "Orbit",
+    "asar": false,
     "directories": {
       "output": "dist"
     },
