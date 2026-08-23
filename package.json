@@ -1,0 +1,45 @@
+{
+  "name": "orbit-chat",
+  "productName": "Orbit",
+  "version": "1.0.0",
+  "description": "App de desktop para conversas, chamadas de voz e compartilhamento de tela",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/start.js",
+    "dist": "electron-builder --win portable"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "express": "^4.19.2",
+    "lowdb": "^1.0.0",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.orbit.chat",
+    "productName": "Orbit",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "server/**/*",
+      "shared/**/*",
+      "renderer/**/*",
+      "!data/**/*"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}

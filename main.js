@@ -1,0 +1,142 @@
+const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, nativeImage, session } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+const argv = process.argv.slice(1);
+function getArg(name, fallback) {
+  const found = argv.find((a) => a.startsWith(`--${name}=`));
+  return found ? found.split('=')[1] : fallback;
+}
+const profile = getArg('profile', 'default');
+
+// Each --profile gets its own isolated userData dir, so two windows on the
+// same machine can be logged in as two different people at the same time.
+const baseUserData = app.getPath('userData');
+app.setPath('userData', path.join(baseUserData, `profile-${profile}`));
+
+const { startServer } = require('./server/index');
+const { DB_FILE } = require('./server/paths');
+const { PORT, IS_REMOTE_SERVER, SERVER_URL } = require('./shared/constants');
+
+let mainWindow = null;
+let pendingSourceResolve = null;
+
+async function ensureServer() {
+  if (IS_REMOTE_SERVER) {
+    // This build points at a hosted server (see shared/constants.js) — never
+    // self-host locally, every copy of the app must talk to that one server.
+    console.log(`[orbit] usando servidor remoto: ${SERVER_URL}`);
+    return;
+  }
+  try {
+    await startServer(DB_FILE);
+    console.log(`[orbit] servidor de sinalização iniciado nesta instância (porta ${PORT})`);
+  } catch (err) {
+    if (err && err.code === 'EADDRINUSE') {
+      console.log('[orbit] servidor já em execução em outro processo — conectando como cliente');
+    } else {
+      console.error('[orbit] erro ao iniciar servidor embutido:', err);
+    }
+  }
+}
+
+function sessionFilePath() {
+  return path.join(app.getPath('userData'), 'session.json');
+}
+
+ipcMain.handle('session:load', () => {
+  try {
+    const raw = fs.readFileSync(sessionFilePath(), 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('session:save', (event, data) => {
+  fs.mkdirSync(path.dirname(sessionFilePath()), { recursive: true });
+  fs.writeFileSync(sessionFilePath(), JSON.stringify(data, null, 2));
+  return true;
+});
+
+ipcMain.handle('session:clear', () => {
+  try { fs.unlinkSync(sessionFilePath()); } catch { /* nothing to clear */ }
+  return true;
+});
+
+ipcMain.handle('avatar:pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Escolher foto de perfil',
+    filters: [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
+    properties: ['openFile'],
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const image = nativeImage.createFromPath(result.filePaths[0]);
+  if (image.isEmpty()) return null;
+  const resized = image.resize({ width: 128, height: 128, quality: 'good' });
+  return resized.toDataURL();
+});
+
+ipcMain.handle('screenshare:pick-response', (event, sourceId) => {
+  if (pendingSourceResolve) {
+    pendingSourceResolve(sourceId || null);
+    pendingSourceResolve = null;
+  }
+  return true;
+});
+
+function setupDisplayMediaHandler() {
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 240, height: 150 },
+      });
+      const forRenderer = sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() }));
+      mainWindow.webContents.send('screenshare:pick-request', forRenderer);
+      const chosenId = await new Promise((resolve) => { pendingSourceResolve = resolve; });
+      const chosen = chosenId ? sources.find((s) => s.id === chosenId) : null;
+      if (!chosen) {
+        callback({});
+        return;
+      }
+      callback({ video: chosen, audio: 'loopback' });
+    } catch (err) {
+      console.error('[orbit] erro ao capturar tela:', err);
+      callback({});
+    }
+  });
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1320,
+    height: 840,
+    minWidth: 1000,
+    minHeight: 660,
+    backgroundColor: '#1e1f22',
+    autoHideMenuBar: true,
+    title: 'Orbit',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+}
+
+app.whenReady().then(async () => {
+  await ensureServer();
+  setupDisplayMediaHandler();
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});

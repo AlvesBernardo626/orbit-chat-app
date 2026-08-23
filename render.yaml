@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: orbit-signaling
+    env: node
+    plan: free
+    buildCommand: npm install --omit=dev --no-audit --no-fund
+    startCommand: node server/start.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0

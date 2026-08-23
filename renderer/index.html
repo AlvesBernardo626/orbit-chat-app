@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' http://localhost:4732 ws://localhost:4732 https://*.onrender.com wss://*.onrender.com;">
+<title>Orbit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Onboarding -->
+  <div id="onboarding-screen" class="onboarding">
+    <div class="onboarding-card">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <span>Orbit</span>
+      </div>
+      <h1>Crie seu perfil</h1>
+      <p class="onboarding-sub">Escolha um nome. Vamos gerar uma tag numérica única para você — é assim que seus amigos vão te adicionar.</p>
+
+      <label class="field-label" for="onboarding-name">Como podemos te chamar?</label>
+      <input id="onboarding-name" class="text-input" type="text" maxlength="24" placeholder="Ex: Aline Ferraz" autocomplete="off">
+
+      <div class="onboarding-preview">
+        Você será encontrado como <strong id="onboarding-preview-name">seunome</strong><span id="onboarding-preview-tag">#####</span>
+      </div>
+
+      <button id="onboarding-submit" class="btn btn-primary btn-block" disabled>Continuar</button>
+      <div id="onboarding-error" class="onboarding-error" hidden></div>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="main-app" class="app-shell" hidden>
+
+    <nav class="nav-rail">
+      <div class="nav-indicator" id="nav-indicator"></div>
+      <button class="nav-btn active" data-tab="friends" title="Amigos">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-6 5.5-6s5.5 2.7 5.5 6"/><circle cx="17" cy="8.5" r="2.5"/><path d="M15.5 14.2c2.6.3 4.5 2.6 4.5 5.8"/></svg>
+      </button>
+      <button class="nav-btn" data-tab="profile" title="Perfil">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3.2"/><path d="M6.5 18.5c1-2.4 3-3.7 5.5-3.7s4.5 1.3 5.5 3.7"/></svg>
+      </button>
+      <button class="nav-btn" data-tab="chat" title="Conversas">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5v8c0 1.4-1.1 2.5-2.5 2.5H10l-4.5 4v-4H6.5C5.1 17 4 15.9 4 14.5v-8Z"/></svg>
+        <span id="chat-unread-dot" class="unread-dot" hidden></span>
+      </button>
+    </nav>
+
+    <!-- Amigos -->
+    <section class="tab-panel" id="tab-friends">
+      <div class="panel-content">
+        <div class="panel-header">
+          <h1>Amigos</h1>
+        </div>
+
+        <div class="add-friend-row">
+          <input id="add-friend-input" class="text-input" type="text" placeholder="usuario#0000">
+          <button id="add-friend-btn" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Adicionar amigo
+          </button>
+        </div>
+        <div id="add-friend-feedback" class="add-friend-feedback" hidden></div>
+
+        <div id="pending-section" class="list-section" hidden>
+          <div class="section-label">Pedidos pendentes</div>
+          <div id="pending-list"></div>
+        </div>
+
+        <div id="outgoing-section" class="list-section" hidden>
+          <div class="section-label">Enviados</div>
+          <div id="outgoing-list"></div>
+        </div>
+
+        <div class="list-section">
+          <div class="section-label" id="online-label">Online — 0</div>
+          <div id="online-list"></div>
+        </div>
+
+        <div class="list-section">
+          <div class="section-label" id="offline-label">Offline — 0</div>
+          <div id="offline-list"></div>
+        </div>
+
+        <div id="friends-empty-state" class="empty-state" hidden>
+          <p>Você ainda não tem amigos por aqui.</p>
+          <p class="empty-state-sub">Adicione alguém usando o campo acima com o nome e a tag, como <strong>usuario#0001</strong>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Perfil -->
+    <section class="tab-panel" id="tab-profile" hidden>
+      <div class="panel-content panel-content-center">
+        <div class="profile-card-wrap">
+          <h1>Perfil</h1>
+          <div class="profile-card">
+            <div class="profile-banner"></div>
+            <div class="profile-body">
+              <div class="profile-avatar-wrap">
+                <div id="profile-avatar" class="avatar avatar-xl avatar-ring"></div>
+                <button id="profile-avatar-edit" class="avatar-edit-badge" title="Alterar foto">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5c0-1 .8-1.8 1.8-1.8h1.4l1-1.5h7.6l1 1.5h1.4c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8H5.8C4.8 19.3 4 18.5 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.2"/></svg>
+                </button>
+              </div>
+
+              <input id="profile-name-input" class="profile-name-input" maxlength="24" placeholder="Nome de exibição">
+              <div id="profile-tag" class="profile-tag"></div>
+
+              <div class="section-label" style="margin-top:22px;">Status</div>
+              <div class="status-options" id="status-options">
+                <div class="status-option" data-status="online">
+                  <span class="status-radio"></span>
+                  <span class="status-dot status-online"></span>
+                  <span class="status-option-text"><span class="status-option-title">Online</span><span class="status-option-sub">Disponível para conversar</span></span>
+                </div>
+                <div class="status-option" data-status="away">
+                  <span class="status-radio"></span>
+                  <span class="status-dot status-away"></span>
+                  <span class="status-option-text"><span class="status-option-title">Ausente</span><span class="status-option-sub">Longe do teclado</span></span>
+                </div>
+                <div class="status-option" data-status="dnd">
+                  <span class="status-radio"></span>
+                  <span class="status-dot status-dnd"></span>
+                  <span class="status-option-text"><span class="status-option-title">Não perturbe</span><span class="status-option-sub">Sem notificações de chamada</span></span>
+                </div>
+                <div class="status-option" data-status="invisible">
+                  <span class="status-radio"></span>
+                  <span class="status-dot status-offline"></span>
+                  <span class="status-option-text"><span class="status-option-title">Invisível</span><span class="status-option-sub">Aparece como offline para outros</span></span>
+                </div>
+              </div>
+
+              <div class="section-label" style="margin-top:22px;">Mensagem de status</div>
+              <textarea id="profile-bio-input" class="bio-textarea" maxlength="140" placeholder="Compartilhe o que você está fazendo..."></textarea>
+
+              <div class="profile-actions">
+                <span id="profile-save-hint" class="profile-save-hint"></span>
+                <button id="profile-save-btn" class="btn btn-primary">Salvar alterações</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Conversas -->
+    <section class="tab-panel" id="tab-chat" hidden>
+      <div class="dm-list">
+        <div class="dm-list-header">
+          <div class="dm-list-title">Conversas</div>
+        </div>
+        <div id="dm-list-items"></div>
+        <div id="dm-list-empty" class="empty-state" hidden>
+          <p class="empty-state-sub">Adicione amigos na aba Amigos para começar a conversar.</p>
+        </div>
+      </div>
+
+      <div class="chat-main" id="chat-main">
+
+        <div id="call-bar" class="call-bar" hidden>
+          <div class="call-bar-info">
+            <span id="call-bar-title">Chamada</span>
+            <span id="call-bar-timer" class="call-bar-timer"></span>
+          </div>
+          <div class="call-bar-actions">
+            <button id="call-bar-mic" class="call-icon-btn" title="Mudo"></button>
+            <button id="call-bar-share" class="call-icon-btn" title="Compartilhar tela"></button>
+            <button id="call-bar-expand" class="call-icon-btn" title="Expandir"></button>
+            <button id="call-bar-end" class="call-icon-btn call-icon-btn-danger" title="Encerrar"></button>
+          </div>
+        </div>
+
+        <div id="chat-empty" class="chat-empty">
+          <p>Selecione uma conversa para começar</p>
+        </div>
+
+        <div id="chat-text-view" class="chat-text-view" hidden>
+          <div class="chat-header" id="chat-header"></div>
+          <div class="chat-messages" id="chat-messages"></div>
+          <div class="chat-input-row">
+            <textarea id="chat-input" class="chat-input" rows="1" placeholder="Mensagem"></textarea>
+            <button id="chat-send-btn" class="send-btn">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-6.5 16-2.7-6.8L4 12Z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div id="call-view" class="call-view" hidden>
+          <div class="call-view-header" id="call-view-header"></div>
+          <div class="call-view-body" id="call-view-body"></div>
+          <div class="call-view-controls" id="call-view-controls"></div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <!-- Incoming call -->
+  <div id="incoming-call-modal" class="modal-overlay" hidden>
+    <div class="incoming-call-card">
+      <div id="incoming-call-avatar" class="avatar avatar-xl"></div>
+      <div id="incoming-call-name" class="incoming-call-name"></div>
+      <div class="incoming-call-sub">Chamada de voz recebida</div>
+      <div class="incoming-call-actions">
+        <button id="incoming-call-decline" class="round-btn round-btn-danger" title="Recusar">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 14.5c1.5-3.5 5-5.5 7.5-5.5s6 2 7.5 5.5c.3.7-.1 1.5-.8 1.7l-2.7.8c-.6.2-1.3-.1-1.6-.7l-.6-1.2c-1.5.4-3 .4-4.6 0l-.6 1.2c-.3.6-1 .9-1.6.7l-2.7-.8c-.7-.2-1.1-1-.8-1.7Z"/></svg>
+        </button>
+        <button id="incoming-call-accept" class="round-btn round-btn-accept" title="Aceitar">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 9 6c.4 1.4.1 2.9-1 4l-.8.8c1 2.4 3.1 4.5 5.5 5.5l.8-.8c1.1-1.1 2.6-1.4 4-1l2.5 3c-1.2 2-3.3 3-5.5 2.6C9.4 19 5 14.6 4.4 9.5 4 7.3 5 5.2 6 3.5Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen share source picker -->
+  <div id="screenshare-picker-modal" class="modal-overlay" hidden>
+    <div class="picker-card">
+      <div class="picker-title">Escolha o que compartilhar</div>
+      <div id="picker-sources" class="picker-sources"></div>
+      <button id="picker-cancel" class="btn btn-ghost btn-block">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <audio id="remote-audio" autoplay></audio>
+
+  <script src="../node_modules/socket.io-client/dist/socket.io.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
