@@ -159,7 +159,9 @@ class CallManager {
 
   setRemoteVolume(volume) {
     const audioEl = document.getElementById('remote-audio');
-    if (audioEl) audioEl.volume = volume;
+    // HTMLMediaElement.volume only accepts 0..1 — it throws outside that
+    // range, so a slider that goes up to 200% needs clamping here.
+    if (audioEl) audioEl.volume = Math.min(1, Math.max(0, volume));
   }
 
   // ---- socket event handlers ----
@@ -275,7 +277,7 @@ class CallManager {
         if (audioEl) {
           audioEl.srcObject = this._remoteAudioStream;
           audioEl.muted = this.deafened;
-          audioEl.volume = this.peer ? getStoredVolume(this.peer.id) : 1;
+          audioEl.volume = this.peer ? Math.min(1, Math.max(0, getStoredVolume(this.peer.id))) : 1;
           audioEl.play().catch(() => {});
         }
         if (!this._remoteSpeakingTracker) this._remoteSpeakingTracker = new SpeakingTracker(this._remoteAudioStream);

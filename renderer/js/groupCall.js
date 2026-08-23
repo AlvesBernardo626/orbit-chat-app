@@ -19,6 +19,11 @@ class GroupCallManager {
     this._localSpeakingTracker = null;
     /** peerId -> { pc, user, remoteAudioStream, remoteScreenStream, screenSender, iceQueue, speakingTracker } */
     this.peers = new Map();
+    /** peerId -> candidate[] — ICE candidates that arrived before _ensurePeer()
+     * ran for that peer (a real race in a mesh: a peer's onicecandidate can
+     * fire, and reach us, before we've processed the offer/participant-joined
+     * event that would normally create its entry first). */
+    this._orphanIceCandidates = new Map();
     this._listeners = [];
     this._bindSocket();
   }
@@ -168,7 +173,9 @@ class GroupCallManager {
 
   setPeerVolume(peerId, volume) {
     const entry = this.peers.get(peerId);
-    if (entry && entry.audioEl) entry.audioEl.volume = volume;
+    // HTMLMediaElement.volume only accepts 0..1 — it throws outside that
+    // range, so a slider that goes up to 200% needs clamping here.
+    if (entry && entry.audioEl) entry.audioEl.volume = Math.min(1, Math.max(0, volume));
   }
 
   // ---- socket handlers ----
@@ -196,6 +203,7 @@ class GroupCallManager {
       this._teardownPeer(entry);
       this.peers.delete(userId);
     }
+    this._orphanIceCandidates.delete(userId);
     this._notify();
   }
 
@@ -225,7 +233,13 @@ class GroupCallManager {
   async _onIceCandidate({ groupId, from, candidate }) {
     if (groupId !== this.groupId || !candidate) return;
     const entry = this.peers.get(from);
-    if (!entry) return;
+    if (!entry) {
+      // We don't know this peer yet — buffer it instead of dropping it;
+      // _ensurePeer() drains this the moment the entry is created.
+      if (!this._orphanIceCandidates.has(from)) this._orphanIceCandidates.set(from, []);
+      this._orphanIceCandidates.get(from).push(candidate);
+      return;
+    }
     if (entry.pc.remoteDescription) {
       try { await entry.pc.addIceCandidate(candidate); } catch { /* ignore */ }
     } else {
@@ -257,6 +271,11 @@ class GroupCallManager {
         emit('call:group-ice-candidate', { groupId: this.groupId, to: user.id, candidate: event.candidate }).catch(() => {});
       }
     };
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        console.warn(`[orbit] group call: conexão com ${user.username || user.id} ficou "${pc.iceConnectionState}" — provável bloqueio de NAT/firewall entre os dois.`);
+      }
+    };
     pc.ontrack = (event) => {
       if (event.track.kind === 'audio') {
         if (!entry.remoteAudioStream) entry.remoteAudioStream = new MediaStream();
@@ -265,7 +284,7 @@ class GroupCallManager {
           const audioEl = document.createElement('audio');
           audioEl.autoplay = true;
           audioEl.muted = this.deafened;
-          audioEl.volume = getStoredVolume(user.id);
+          audioEl.volume = Math.min(1, Math.max(0, getStoredVolume(user.id)));
           document.body.appendChild(audioEl);
           entry.audioEl = audioEl;
         }
@@ -285,6 +304,13 @@ class GroupCallManager {
       }
     };
     this.peers.set(user.id, entry);
+
+    const orphaned = this._orphanIceCandidates.get(user.id);
+    if (orphaned) {
+      entry.iceQueue.push(...orphaned);
+      this._orphanIceCandidates.delete(user.id);
+    }
+
     return entry;
   }
 
@@ -331,6 +357,7 @@ class GroupCallManager {
   _cleanupAll() {
     this.peers.forEach((entry) => this._teardownPeer(entry));
     this.peers.clear();
+    this._orphanIceCandidates.clear();
     if (this._localSpeakingTracker) { this._localSpeakingTracker.stop(); this._localSpeakingTracker = null; }
     if (this.localStream) {
       this.localStream.getTracks().forEach((t) => t.stop());
