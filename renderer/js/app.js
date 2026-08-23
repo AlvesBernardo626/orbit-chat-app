@@ -1,12 +1,17 @@
 import { emit, on } from './api.js';
 import { callManager } from './call.js';
 import { groupCallManager } from './groupCall.js';
+import { getStoredVolume, setStoredVolume } from './volume.js';
 import {
   escapeHtml, initials, avatarStyle, statusLabel, statusDotClass,
   formatTime, formatDayTime, toast, el,
 } from './ui.js';
 
 const MAX_GROUP_MEMBERS = 10;
+
+const ringtoneAudio = new Audio('assets/ringtone.mp3');
+ringtoneAudio.loop = true;
+ringtoneAudio.volume = 0.85;
 
 const state = {
   currentUser: null,
@@ -24,6 +29,7 @@ const state = {
   pendingAutoShare: null,
   pendingGroupContext: null, // { peerId } when creating a group from an active DM call
   editingGroupId: null,
+  volumePopoverTarget: null, // userId currently shown in the volume popover
 };
 
 const dom = {
@@ -118,6 +124,11 @@ const dom = {
   groupSettingsAddFriends: document.getElementById('group-settings-add-friends'),
   groupSettingsCancel: document.getElementById('group-settings-cancel'),
   groupSettingsSave: document.getElementById('group-settings-save'),
+
+  volumePopover: document.getElementById('volume-popover'),
+  volumePopoverName: document.getElementById('volume-popover-name'),
+  volumeSlider: document.getElementById('volume-slider'),
+  volumePopoverValue: document.getElementById('volume-popover-value'),
 };
 
 // ---------------- Icons ----------------
@@ -146,6 +157,7 @@ async function boot() {
   callManager.onUpdate(onCallUpdate);
   groupCallManager.onUpdate(onGroupCallUpdate);
   setInterval(tickTimers, 1000);
+  requestAnimationFrame(speakingLoop);
 
   const saved = await window.orbit.session.load();
   if (saved && saved.id) {
@@ -415,6 +427,50 @@ function wireStaticHandlers() {
     dom.groupSettingsAvatar.textContent = '';
     dom.groupSettingsAvatar.dataset.pendingIcon = dataUrl;
   });
+
+  // Per-user call volume popover
+  dom.volumeSlider.addEventListener('input', () => {
+    if (!state.volumePopoverTarget) return;
+    const pct = Number(dom.volumeSlider.value);
+    dom.volumePopoverValue.textContent = `${pct}%`;
+    const volume = pct / 100;
+    setStoredVolume(state.volumePopoverTarget, volume);
+    applyLiveVolume(state.volumePopoverTarget, volume);
+  });
+  document.addEventListener('mousedown', (e) => {
+    if (!dom.volumePopover.hidden && !dom.volumePopover.contains(e.target)) closeVolumePopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !dom.volumePopover.hidden) closeVolumePopover();
+  });
+}
+
+function applyLiveVolume(userId, volume) {
+  if (callManager.state !== 'idle' && callManager.peer && callManager.peer.id === userId) {
+    callManager.setRemoteVolume(volume);
+  }
+  if (groupCallManager.state !== 'idle') {
+    groupCallManager.setPeerVolume(userId, volume);
+  }
+}
+
+function openVolumePopover(evt, user) {
+  evt.preventDefault();
+  state.volumePopoverTarget = user.id;
+  const pct = Math.round(getStoredVolume(user.id) * 100);
+  dom.volumePopoverName.textContent = user.username || 'Usuário';
+  dom.volumeSlider.value = String(pct);
+  dom.volumePopoverValue.textContent = `${pct}%`;
+  dom.volumePopover.hidden = false;
+  const left = Math.min(evt.clientX, window.innerWidth - 216);
+  const top = Math.min(evt.clientY, window.innerHeight - 96);
+  dom.volumePopover.style.left = `${Math.max(8, left)}px`;
+  dom.volumePopover.style.top = `${Math.max(8, top)}px`;
+}
+
+function closeVolumePopover() {
+  dom.volumePopover.hidden = true;
+  state.volumePopoverTarget = null;
 }
 
 function activeCallManager() {
@@ -957,11 +1013,22 @@ function onCallUpdate(cm) {
     state.pendingAutoShare = null;
     cm.toggleScreenShare();
   }
-  if (cm.state === 'idle') state.pendingAutoShare = null;
+  if (cm.state === 'idle') { state.pendingAutoShare = null; closeVolumePopover(); }
 
+  updateRingtone();
   renderIncomingModal();
   renderChatMain();
   renderDmList();
+}
+
+function updateRingtone() {
+  const ringing = callManager.state === 'ringing' || groupCallManager.state === 'ringing';
+  if (ringing) {
+    if (ringtoneAudio.paused) ringtoneAudio.play().catch(() => {});
+  } else if (!ringtoneAudio.paused) {
+    ringtoneAudio.pause();
+    ringtoneAudio.currentTime = 0;
+  }
 }
 
 function renderIncomingModal() {
@@ -976,6 +1043,8 @@ function renderIncomingModal() {
 
 // ---------------- Group call UI ----------------
 function onGroupCallUpdate() {
+  if (groupCallManager.state === 'idle') closeVolumePopover();
+  updateRingtone();
   renderIncomingGroupModal();
   renderChatMain();
   renderDmList();
@@ -1043,11 +1112,11 @@ function renderCallView() {
           <video id="screenshare-video" autoplay playsinline></video>
         </div>
         <div class="screenshare-strip">
-          <div class="screenshare-thumb">
+          <div class="screenshare-thumb" data-speaking-key="self">
             <div class="avatar avatar-sm" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
             <div class="screenshare-thumb-name">Você</div>
           </div>
-          <div class="screenshare-thumb">
+          <div class="screenshare-thumb" data-speaking-key="peer">
             <div class="avatar avatar-sm" style="${avatarStyle(peer)}">${avatarInner(peer)}</div>
             <div class="screenshare-thumb-name">${escapeHtml(peer.username)}</div>
           </div>
@@ -1058,17 +1127,20 @@ function renderCallView() {
     if (videoEl && stream) videoEl.srcObject = stream;
   } else {
     dom.callViewBody.innerHTML = `
-      <div class="participant-tile">
+      <div class="participant-tile" data-speaking-key="self">
         <div class="avatar avatar-lg" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
         <div class="participant-tile-name">Você</div>
         <div class="participant-mic-badge ${cm.micMuted ? 'muted' : ''}">${cm.micMuted ? ICONS.micOff : ICONS.mic}</div>
       </div>
-      <div class="participant-tile ${cm.state === 'connected' ? 'speaking-hint' : ''}">
+      <div class="participant-tile" data-speaking-key="peer">
         <div class="avatar avatar-lg" style="${avatarStyle(peer)}">${avatarInner(peer)}</div>
         <div class="participant-tile-name">${escapeHtml(peer.username)}</div>
         ${cm.state === 'calling' ? '<div class="participant-tile-name" style="font-weight:500;color:var(--text-tertiary);font-size:12px;">Chamando...</div>' : ''}
       </div>`;
   }
+
+  const peerTileEl = dom.callViewBody.querySelector('[data-speaking-key="peer"]');
+  if (peerTileEl) peerTileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, peer));
 
   const showControls = cm.state === 'calling' || cm.state === 'connected';
   dom.callViewControls.innerHTML = showControls ? `
@@ -1120,12 +1192,12 @@ function renderGroupCallView() {
           <video id="screenshare-video" autoplay playsinline></video>
         </div>
         <div class="screenshare-strip">
-          <div class="screenshare-thumb">
+          <div class="screenshare-thumb" data-speaking-key="self">
             <div class="avatar avatar-sm" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
             <div class="screenshare-thumb-name">Você</div>
           </div>
           ${participants.map((p) => `
-            <div class="screenshare-thumb">
+            <div class="screenshare-thumb" data-speaking-key="${p.user.id}">
               <div class="avatar avatar-sm" style="${avatarStyle(p.user)}">${avatarInner(p.user)}</div>
               <div class="screenshare-thumb-name">${escapeHtml(p.user.username || '')}</div>
             </div>`).join('')}
@@ -1136,18 +1208,23 @@ function renderGroupCallView() {
     if (videoEl && stream) videoEl.srcObject = stream;
   } else {
     const selfTile = `
-      <div class="participant-tile">
+      <div class="participant-tile" data-speaking-key="self">
         <div class="avatar avatar-lg" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
         <div class="participant-tile-name">Você</div>
         <div class="participant-mic-badge ${cm.micMuted ? 'muted' : ''}">${cm.micMuted ? ICONS.micOff : ICONS.mic}</div>
       </div>`;
     const peerTiles = participants.map((p) => `
-      <div class="participant-tile">
+      <div class="participant-tile" data-speaking-key="${p.user.id}">
         <div class="avatar avatar-lg" style="${avatarStyle(p.user)}">${avatarInner(p.user)}</div>
         <div class="participant-tile-name">${escapeHtml(p.user.username || '')}</div>
       </div>`).join('');
     dom.callViewBody.innerHTML = selfTile + peerTiles;
   }
+
+  participants.forEach((p) => {
+    const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(p.user.id)}"]`);
+    if (tileEl) tileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, p.user));
+  });
 
   dom.callViewControls.innerHTML = `
     <div class="call-controls-pill">
@@ -1168,6 +1245,34 @@ function formatDuration(totalSeconds) {
   const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
   const s = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
+}
+
+// ---------------- Speaking indicator ----------------
+// Runs every animation frame instead of going through the normal
+// render/_notify cycle: toggling a class directly avoids re-rendering the
+// whole call view (and re-mounting the screenshare <video>) dozens of
+// times a second just to reflect who's currently talking.
+function speakingLoop() {
+  requestAnimationFrame(speakingLoop);
+  if (dom.callView.hidden) return;
+  const cm = activeCallManager();
+  if (!cm || cm.state !== 'connected') return;
+
+  if (cm === callManager) {
+    setSpeakingClass('self', callManager.isLocalSpeaking());
+    setSpeakingClass('peer', callManager.isRemoteSpeaking());
+  } else if (cm === groupCallManager) {
+    setSpeakingClass('self', groupCallManager.isLocalSpeaking());
+    groupCallManager.participantList().forEach((p) => {
+      setSpeakingClass(p.user.id, groupCallManager.isPeerSpeaking(p.user.id));
+    });
+  }
+}
+
+function setSpeakingClass(key, speaking) {
+  const tile = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(String(key))}"]`);
+  const avatarEl = tile && tile.querySelector('.avatar');
+  if (avatarEl) avatarEl.classList.toggle('speaking', speaking);
 }
 
 function tickTimers() {

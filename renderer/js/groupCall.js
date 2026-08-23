@@ -1,5 +1,7 @@
 import { emit, on } from './api.js';
 import { toast } from './ui.js';
+import { SpeakingTracker } from './audioLevel.js';
+import { getStoredVolume } from './volume.js';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -14,7 +16,8 @@ class GroupCallManager {
     this.deafened = false;
     this.sharingLocal = false;
     this.localScreenStream = null;
-    /** peerId -> { pc, user, remoteAudioStream, remoteScreenStream, screenSender, iceQueue } */
+    this._localSpeakingTracker = null;
+    /** peerId -> { pc, user, remoteAudioStream, remoteScreenStream, screenSender, iceQueue, speakingTracker } */
     this.peers = new Map();
     this._listeners = [];
     this._bindSocket();
@@ -154,6 +157,20 @@ class GroupCallManager {
     return Math.max(0, Math.floor((Date.now() - this.connectedAt) / 1000));
   }
 
+  isLocalSpeaking() {
+    return this._localSpeakingTracker ? this._localSpeakingTracker.isSpeaking() : false;
+  }
+
+  isPeerSpeaking(peerId) {
+    const entry = this.peers.get(peerId);
+    return entry && entry.speakingTracker ? entry.speakingTracker.isSpeaking() : false;
+  }
+
+  setPeerVolume(peerId, volume) {
+    const entry = this.peers.get(peerId);
+    if (entry && entry.audioEl) entry.audioEl.volume = volume;
+  }
+
   // ---- socket handlers ----
 
   _onIncoming({ group, from }) {
@@ -234,7 +251,7 @@ class GroupCallManager {
       return entry;
     }
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    entry = { pc, user, iceQueue: [], remoteAudioStream: null, remoteScreenStream: null, remoteSharing: false, screenSender: null, audioEl: null };
+    entry = { pc, user, iceQueue: [], remoteAudioStream: null, remoteScreenStream: null, remoteSharing: false, screenSender: null, audioEl: null, speakingTracker: null };
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         emit('call:group-ice-candidate', { groupId: this.groupId, to: user.id, candidate: event.candidate }).catch(() => {});
@@ -248,11 +265,13 @@ class GroupCallManager {
           const audioEl = document.createElement('audio');
           audioEl.autoplay = true;
           audioEl.muted = this.deafened;
+          audioEl.volume = getStoredVolume(user.id);
           document.body.appendChild(audioEl);
           entry.audioEl = audioEl;
         }
         entry.audioEl.srcObject = entry.remoteAudioStream;
         entry.audioEl.play().catch(() => {});
+        if (!entry.speakingTracker) entry.speakingTracker = new SpeakingTracker(entry.remoteAudioStream);
       } else if (event.track.kind === 'video') {
         if (!entry.remoteScreenStream) entry.remoteScreenStream = new MediaStream();
         entry.remoteScreenStream.addTrack(event.track);
@@ -281,6 +300,7 @@ class GroupCallManager {
     if (this.localStream) return;
     this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.micMuted = false;
+    this._localSpeakingTracker = new SpeakingTracker(this.localStream);
   }
 
   async _createAndSendOffer(peerId) {
@@ -305,11 +325,13 @@ class GroupCallManager {
       entry.audioEl.srcObject = null;
       entry.audioEl.remove();
     }
+    if (entry.speakingTracker) entry.speakingTracker.stop();
   }
 
   _cleanupAll() {
     this.peers.forEach((entry) => this._teardownPeer(entry));
     this.peers.clear();
+    if (this._localSpeakingTracker) { this._localSpeakingTracker.stop(); this._localSpeakingTracker = null; }
     if (this.localStream) {
       this.localStream.getTracks().forEach((t) => t.stop());
       this.localStream = null;

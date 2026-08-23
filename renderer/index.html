@@ -285,6 +285,15 @@
     </div>
   </div>
 
+  <!-- Per-user call volume (right-click a participant's icon in a call) -->
+  <div id="volume-popover" class="volume-popover" hidden>
+    <div id="volume-popover-name" class="volume-popover-name"></div>
+    <div class="volume-popover-row">
+      <input id="volume-slider" type="range" min="0" max="200" step="1" value="100">
+      <span id="volume-popover-value" class="volume-popover-value">100%</span>
+    </div>
+  </div>
+
   <div id="toast-container" class="toast-container"></div>
 
   <audio id="remote-audio" autoplay></audio>

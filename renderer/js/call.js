@@ -1,5 +1,7 @@
 import { emit, on } from './api.js';
 import { toast } from './ui.js';
+import { SpeakingTracker } from './audioLevel.js';
+import { getStoredVolume } from './volume.js';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -18,6 +20,8 @@ class CallManager {
     this.remoteScreenStream = null;
     this._screenSender = null;
     this._remoteAudioStream = null;
+    this._localSpeakingTracker = null;
+    this._remoteSpeakingTracker = null;
     this._iceQueue = [];
     this._listeners = [];
     this._bindSocket();
@@ -145,6 +149,19 @@ class CallManager {
     return Math.max(0, Math.floor((Date.now() - this.connectedAt) / 1000));
   }
 
+  isLocalSpeaking() {
+    return this._localSpeakingTracker ? this._localSpeakingTracker.isSpeaking() : false;
+  }
+
+  isRemoteSpeaking() {
+    return this._remoteSpeakingTracker ? this._remoteSpeakingTracker.isSpeaking() : false;
+  }
+
+  setRemoteVolume(volume) {
+    const audioEl = document.getElementById('remote-audio');
+    if (audioEl) audioEl.volume = volume;
+  }
+
   // ---- socket event handlers ----
 
   _onIncoming(fromUser) {
@@ -258,8 +275,10 @@ class CallManager {
         if (audioEl) {
           audioEl.srcObject = this._remoteAudioStream;
           audioEl.muted = this.deafened;
+          audioEl.volume = this.peer ? getStoredVolume(this.peer.id) : 1;
           audioEl.play().catch(() => {});
         }
+        if (!this._remoteSpeakingTracker) this._remoteSpeakingTracker = new SpeakingTracker(this._remoteAudioStream);
       } else if (event.track.kind === 'video') {
         if (!this.remoteScreenStream) this.remoteScreenStream = new MediaStream();
         this.remoteScreenStream.addTrack(event.track);
@@ -282,6 +301,7 @@ class CallManager {
     this.localStream = stream;
     stream.getAudioTracks().forEach((track) => this.pc.addTrack(track, stream));
     this.micMuted = false;
+    this._localSpeakingTracker = new SpeakingTracker(stream);
   }
 
   async _createAndSendOffer() {
@@ -319,6 +339,8 @@ class CallManager {
     const audioEl = document.getElementById('remote-audio');
     if (audioEl) audioEl.srcObject = null;
     this._remoteAudioStream = null;
+    if (this._localSpeakingTracker) { this._localSpeakingTracker.stop(); this._localSpeakingTracker = null; }
+    if (this._remoteSpeakingTracker) { this._remoteSpeakingTracker.stop(); this._remoteSpeakingTracker = null; }
     this.remoteScreenStream = null;
     this.remoteSharing = false;
     this.sharingLocal = false;
