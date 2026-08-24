@@ -1,9 +1,9 @@
 import { emit, on } from './api.js';
 import { callManager } from './call.js';
 import { groupCallManager } from './groupCall.js';
-import { getStoredVolume, setStoredVolume } from './volume.js';
+import { getStoredVolume, setStoredVolume, getStoredShareVolume, setStoredShareVolume } from './volume.js';
 import {
-  escapeHtml, initials, avatarStyle, statusLabel, statusDotClass,
+  escapeHtml, linkifyHtml, initials, avatarStyle, statusLabel, statusDotClass,
   formatTime, formatDayTime, toast, el,
 } from './ui.js';
 
@@ -30,6 +30,8 @@ const state = {
   pendingGroupContext: null, // { peerId } when creating a group from an active DM call
   editingGroupId: null,
   volumePopoverTarget: null, // userId currently shown in the volume popover
+  volumePopoverMode: 'voice', // 'voice' | 'share'
+  focusedShareId: null, // 'self' | userId — which of possibly several simultaneous screen shares is in the big stage
 };
 
 const dom = {
@@ -286,6 +288,19 @@ function bindRealtimeEvents() {
     if (state.selectedType === 'group' && state.selectedGroupId === group.id) renderChatMain();
   });
 
+  // Who's currently on a group's call — kept live for every member, even
+  // people not on the call themselves, so leaving/joining always reflects
+  // correctly instead of only being visible from inside the call view.
+  on('call:group-roster', ({ groupId, participantIds }) => {
+    const group = state.groups.find((g) => g.id === groupId);
+    if (!group) return;
+    group.activeCallMemberIds = participantIds;
+    renderDmList();
+    if (state.selectedType === 'group' && state.selectedGroupId === groupId && !isCallViewShowing()) {
+      renderGroupChatHeader(group);
+    }
+  });
+
   on('group:message:receive', (message) => {
     const groupId = message.groupId;
     const conv = state.groupConversations[groupId] || (state.groupConversations[groupId] = { messages: null, unread: 0 });
@@ -428,14 +443,15 @@ function wireStaticHandlers() {
     dom.groupSettingsAvatar.dataset.pendingIcon = dataUrl;
   });
 
-  // Per-user call volume popover
+  // Per-user call volume popover (voice) / per-share volume popover (screen share audio)
   dom.volumeSlider.addEventListener('input', () => {
     if (!state.volumePopoverTarget) return;
     const pct = Number(dom.volumeSlider.value);
     dom.volumePopoverValue.textContent = `${pct}%`;
     const volume = pct / 100;
-    setStoredVolume(state.volumePopoverTarget, volume);
-    applyLiveVolume(state.volumePopoverTarget, volume);
+    if (state.volumePopoverMode === 'share') setStoredShareVolume(state.volumePopoverTarget, volume);
+    else setStoredVolume(state.volumePopoverTarget, volume);
+    applyLiveVolume(state.volumePopoverTarget, volume, state.volumePopoverMode);
   });
   document.addEventListener('mousedown', (e) => {
     if (!dom.volumePopover.hidden && !dom.volumePopover.contains(e.target)) closeVolumePopover();
@@ -445,7 +461,16 @@ function wireStaticHandlers() {
   });
 }
 
-function applyLiveVolume(userId, volume) {
+function applyLiveVolume(userId, volume, mode) {
+  if (mode === 'share') {
+    if (callManager.state !== 'idle' && callManager.peer && callManager.peer.id === userId) {
+      callManager.setRemoteShareVolume(volume);
+    }
+    if (groupCallManager.state !== 'idle') {
+      groupCallManager.setPeerShareVolume(volume);
+    }
+    return;
+  }
   if (callManager.state !== 'idle' && callManager.peer && callManager.peer.id === userId) {
     callManager.setRemoteVolume(volume);
   }
@@ -454,11 +479,14 @@ function applyLiveVolume(userId, volume) {
   }
 }
 
-function openVolumePopover(evt, user) {
+function openVolumePopover(evt, user, mode = 'voice') {
   evt.preventDefault();
+  evt.stopPropagation();
   state.volumePopoverTarget = user.id;
-  const pct = Math.round(getStoredVolume(user.id) * 100);
-  dom.volumePopoverName.textContent = user.username || 'Usuário';
+  state.volumePopoverMode = mode;
+  const stored = mode === 'share' ? getStoredShareVolume(user.id) : getStoredVolume(user.id);
+  const pct = Math.round(stored * 100);
+  dom.volumePopoverName.textContent = mode === 'share' ? `Transmissão de ${user.username || 'Usuário'}` : (user.username || 'Usuário');
   dom.volumeSlider.value = String(pct);
   dom.volumePopoverValue.textContent = `${pct}%`;
   dom.volumePopover.hidden = false;
@@ -471,6 +499,7 @@ function openVolumePopover(evt, user) {
 function closeVolumePopover() {
   dom.volumePopover.hidden = true;
   state.volumePopoverTarget = null;
+  state.volumePopoverMode = 'voice';
 }
 
 function activeCallManager() {
@@ -708,7 +737,7 @@ function groupRowHtml({ id, entity: group, lastMsg, unread }) {
     ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : `${escapeHtml(senderName)}: `}${escapeHtml(lastMsg.text)}`
     : `<span style="color:var(--text-muted);">${group.members.length} membros</span>`;
   const time = lastMsg ? formatDayTime(lastMsg.createdAt) : '';
-  const inCall = groupCallManager.state !== 'idle' && groupCallManager.groupId === id;
+  const callCount = (group.activeCallMemberIds || []).length;
   const selected = state.selectedType === 'group' && state.selectedGroupId === id;
   const groupLike = groupAsAvatarLike(group);
   return `
@@ -718,7 +747,7 @@ function groupRowHtml({ id, entity: group, lastMsg, unread }) {
     </div>
     <div class="dm-row-info">
       <div class="dm-row-name">${escapeHtml(group.name)}</div>
-      <div class="dm-row-preview">${inCall ? '<span style="color:var(--accent);font-weight:600;">Em chamada</span>' : preview}</div>
+      <div class="dm-row-preview">${callCount > 0 ? `<span style="color:var(--accent);font-weight:600;">Em chamada · ${callCount}</span>` : preview}</div>
     </div>
     <div class="dm-row-meta">
       <div class="dm-row-time">${time}</div>
@@ -856,6 +885,15 @@ function renderChatHeader(friend) {
 function renderGroupChatHeader(group) {
   const groupLike = groupAsAvatarLike(group);
   const inCallWithGroup = groupCallManager.state !== 'idle' && groupCallManager.groupId === group.id;
+  const callMembers = (group.activeCallMemberIds || [])
+    .map((id) => (id === state.currentUser.id ? state.currentUser : group.members.find((m) => m.id === id)))
+    .filter(Boolean);
+  const statusHtml = callMembers.length > 0
+    ? `<div class="chat-header-call-roster">
+        <div class="call-roster-avatars">${callMembers.slice(0, 4).map((u) => `<div class="avatar avatar-xs" style="${avatarStyle(u)}" title="${escapeHtml(u.username)}">${avatarInner(u)}</div>`).join('')}</div>
+        <span>Em chamada · ${callMembers.length}</span>
+      </div>`
+    : `${group.members.length} membros`;
   dom.chatHeader.innerHTML = `
     <div class="chat-header-user">
       <div class="chat-header-avatar">
@@ -863,11 +901,11 @@ function renderGroupChatHeader(group) {
       </div>
       <div>
         <div class="chat-header-name">${escapeHtml(group.name)}</div>
-        <div class="chat-header-status">${group.members.length} membros</div>
+        <div class="chat-header-status">${statusHtml}</div>
       </div>
     </div>
     <div class="chat-header-actions">
-      <button class="icon-btn" id="chat-group-call-btn" title="Chamada de voz">${ICONS.phone}</button>
+      <button class="icon-btn" id="chat-group-call-btn" title="${inCallWithGroup ? 'Voltar para a chamada' : (callMembers.length > 0 ? 'Entrar na chamada' : 'Chamada de voz')}">${ICONS.phone}</button>
       <button class="icon-btn" id="chat-group-share-btn" title="Compartilhar tela">${ICONS.monitor}</button>
       <button class="icon-btn" id="chat-group-settings-btn" title="Configurações do grupo">${ICONS.gear}</button>
     </div>`;
@@ -918,7 +956,11 @@ function requestGroupCall(group) {
     return;
   }
   state.callViewExpanded = true;
-  groupCallManager.startGroupCall(group);
+  if (group.activeCallMemberIds && group.activeCallMemberIds.length > 0) {
+    groupCallManager.joinActiveCall(group);
+  } else {
+    groupCallManager.startGroupCall(group);
+  }
 }
 
 function requestGroupScreenShare(group) {
@@ -938,18 +980,19 @@ function renderChatMessages() {
   dom.chatMessages.innerHTML = messages.map((m) => {
     const mine = m.from === state.currentUser.id;
     if (mine) {
-      return `<div class="msg-row msg-row-out"><div class="msg-bubble-out">${escapeHtml(m.text)}</div></div>`;
+      return `<div class="msg-row msg-row-out"><div class="msg-bubble-out">${linkifyHtml(m.text)}</div></div>`;
     }
     return `
       <div class="msg-row">
         <div class="avatar msg-avatar" style="${avatarStyle(friend)}">${friend ? avatarInner(friend) : ''}</div>
         <div class="msg-body">
           <div class="msg-meta"><span class="msg-author">${escapeHtml(friend ? friend.username : '')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
-          <div class="msg-text">${escapeHtml(m.text)}</div>
+          <div class="msg-text">${linkifyHtml(m.text)}</div>
         </div>
       </div>`;
   }).join('');
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+  wireMessageLinks();
 }
 
 function renderGroupChatMessages() {
@@ -959,7 +1002,7 @@ function renderGroupChatMessages() {
   dom.chatMessages.innerHTML = messages.map((m) => {
     const mine = m.from === state.currentUser.id;
     if (mine) {
-      return `<div class="msg-row msg-row-out"><div class="msg-bubble-out">${escapeHtml(m.text)}</div></div>`;
+      return `<div class="msg-row msg-row-out"><div class="msg-bubble-out">${linkifyHtml(m.text)}</div></div>`;
     }
     const sender = group ? group.members.find((mem) => mem.id === m.from) : null;
     return `
@@ -967,11 +1010,23 @@ function renderGroupChatMessages() {
         <div class="avatar msg-avatar" style="${sender ? avatarStyle(sender) : ''}">${sender ? avatarInner(sender) : ''}</div>
         <div class="msg-body">
           <div class="msg-meta"><span class="msg-author">${escapeHtml(sender ? sender.username : 'Alguém')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
-          <div class="msg-text">${escapeHtml(m.text)}</div>
+          <div class="msg-text">${linkifyHtml(m.text)}</div>
         </div>
       </div>`;
   }).join('');
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+  wireMessageLinks();
+}
+
+// Links in chat must never navigate this window (see main.js's
+// will-navigate guard) — always hand them to the OS's default browser.
+function wireMessageLinks() {
+  dom.chatMessages.querySelectorAll('a[data-ext-link]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.orbit.external.open(a.getAttribute('href'));
+    });
+  });
 }
 
 async function sendMessage() {
@@ -1013,7 +1068,7 @@ function onCallUpdate(cm) {
     state.pendingAutoShare = null;
     cm.toggleScreenShare();
   }
-  if (cm.state === 'idle') { state.pendingAutoShare = null; closeVolumePopover(); }
+  if (cm.state === 'idle') { state.pendingAutoShare = null; state.focusedShareId = null; closeVolumePopover(); }
 
   updateRingtone();
   renderIncomingModal();
@@ -1043,7 +1098,7 @@ function renderIncomingModal() {
 
 // ---------------- Group call UI ----------------
 function onGroupCallUpdate() {
-  if (groupCallManager.state === 'idle') closeVolumePopover();
+  if (groupCallManager.state === 'idle') { state.focusedShareId = null; closeVolumePopover(); }
   updateRingtone();
   renderIncomingGroupModal();
   renderChatMain();
@@ -1090,6 +1145,104 @@ function renderCallBar(cm) {
   dom.callBarEnd.innerHTML = ICONS.phoneEnd;
 }
 
+// ---------------- Screen share stage (supports multiple simultaneous shares) ----------------
+// Returns everyone currently sharing their screen in this call — could be
+// just you, just the other person/people, or several at once in a group.
+function collectShares(cm) {
+  const shares = [];
+  if (cm.sharingLocal) shares.push({ id: 'self', user: state.currentUser, stream: cm.localScreenStream, isSelf: true });
+  if (cm === callManager) {
+    if (cm.remoteSharing && cm.peer) shares.push({ id: cm.peer.id, user: cm.peer, stream: cm.remoteScreenStream, isSelf: false });
+  } else {
+    cm.participantList().forEach((p) => {
+      if (p.remoteSharing) shares.push({ id: p.user.id, user: p.user, stream: p.remoteScreenStream, isSelf: false });
+    });
+  }
+  return shares;
+}
+
+// Keeps the previously-focused share selected across re-renders; falls back
+// to the first available share if that person stopped sharing (or nothing
+// was focused yet).
+function focusedShare(shares) {
+  if (shares.length === 0) return null;
+  const found = shares.find((s) => s.id === state.focusedShareId);
+  if (found) return found;
+  state.focusedShareId = shares[0].id;
+  return shares[0];
+}
+
+function switchFocusedShare(shareId) {
+  state.focusedShareId = shareId;
+  closeVolumePopover();
+  renderChatMain();
+}
+
+// allTiles: every participant (sharing or not), used for the thumbnail
+// strip so non-sharers still show up there like before.
+function renderScreenshareStage(shares, allTiles) {
+  const focus = focusedShare(shares);
+
+  const switcherHtml = shares.length > 1 ? `
+    <div class="share-switcher">
+      ${shares.map((s) => `
+        <button class="share-switcher-btn ${focus && s.id === focus.id ? 'active' : ''}" data-share-id="${s.id}">
+          <div class="avatar avatar-xs" style="${avatarStyle(s.user)}">${avatarInner(s.user)}</div>
+          <span>${escapeHtml(s.isSelf ? 'Você' : (s.user.username || ''))}</span>
+        </button>`).join('')}
+    </div>` : '';
+
+  const label = focus
+    ? (focus.isSelf ? 'Você está compartilhando sua tela' : `${escapeHtml(focus.user.username || '')} está compartilhando a tela`)
+    : '';
+
+  dom.callViewBody.innerHTML = `
+    <div class="screenshare-panel">
+      ${switcherHtml}
+      <div class="screenshare-stage">
+        <div class="screenshare-label">${label}</div>
+        <video id="screenshare-video" autoplay playsinline></video>
+      </div>
+      <div class="screenshare-strip">
+        ${allTiles.map((t) => {
+          const isSharer = shares.some((s) => s.id === t.id);
+          const isFocused = !!(focus && t.id === focus.id);
+          return `
+          <div class="screenshare-thumb ${isSharer ? 'is-sharer' : ''} ${isFocused ? 'is-focused' : ''}" data-speaking-key="${t.id}" ${isSharer ? `data-share-id="${t.id}"` : ''}>
+            <div class="avatar avatar-sm" style="${avatarStyle(t.user)}">${avatarInner(t.user)}${isSharer ? `<span class="screenshare-thumb-badge">${ICONS.monitor}</span>` : ''}</div>
+            <div class="screenshare-thumb-name">${escapeHtml(t.isSelf ? 'Você' : (t.user.username || ''))}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  const videoEl = document.getElementById('screenshare-video');
+  if (videoEl && focus) {
+    videoEl.srcObject = focus.stream;
+    // Never play your own captured system audio back to yourself — you
+    // already hear it natively. Only remote shares get the volume control.
+    videoEl.muted = focus.isSelf;
+    videoEl.volume = focus.isSelf ? 1 : Math.min(1, Math.max(0, getStoredShareVolume(focus.id)));
+  }
+
+  dom.callViewBody.querySelectorAll('[data-share-id]').forEach((btn) => {
+    btn.addEventListener('click', () => switchFocusedShare(btn.dataset.shareId));
+  });
+
+  // Right-click a thumbnail = that person's voice volume (skip yourself).
+  allTiles.forEach((t) => {
+    if (t.isSelf) return;
+    const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(t.id)}"]`);
+    if (tileEl) tileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, t.user, 'voice'));
+  });
+
+  // Right-click the big stage = the focused share's own audio volume.
+  const stageEl = dom.callViewBody.querySelector('.screenshare-stage');
+  if (stageEl && focus && !focus.isSelf) {
+    stageEl.addEventListener('contextmenu', (e) => openVolumePopover(e, focus.user, 'share'));
+  }
+}
+
 function renderCallView() {
   const cm = callManager;
   const peer = cm.peer;
@@ -1105,26 +1258,11 @@ function renderCallView() {
     <div class="call-view-timer">${cm.state === 'connected' ? formatDuration(cm.elapsedSeconds()) : ''}</div>`;
 
   if (isSharing) {
-    dom.callViewBody.innerHTML = `
-      <div class="screenshare-panel">
-        <div class="screenshare-stage">
-          <div class="screenshare-label">${cm.remoteSharing ? `${escapeHtml(peer.username)} está compartilhando a tela` : 'Você está compartilhando sua tela'}</div>
-          <video id="screenshare-video" autoplay playsinline></video>
-        </div>
-        <div class="screenshare-strip">
-          <div class="screenshare-thumb" data-speaking-key="self">
-            <div class="avatar avatar-sm" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
-            <div class="screenshare-thumb-name">Você</div>
-          </div>
-          <div class="screenshare-thumb" data-speaking-key="peer">
-            <div class="avatar avatar-sm" style="${avatarStyle(peer)}">${avatarInner(peer)}</div>
-            <div class="screenshare-thumb-name">${escapeHtml(peer.username)}</div>
-          </div>
-        </div>
-      </div>`;
-    const videoEl = document.getElementById('screenshare-video');
-    const stream = cm.remoteSharing ? cm.remoteScreenStream : cm.localScreenStream;
-    if (videoEl && stream) videoEl.srcObject = stream;
+    const allTiles = [
+      { id: 'self', user: state.currentUser, isSelf: true },
+      { id: peer.id, user: peer, isSelf: false },
+    ];
+    renderScreenshareStage(collectShares(cm), allTiles);
   } else {
     dom.callViewBody.innerHTML = `
       <div class="participant-tile" data-speaking-key="self">
@@ -1132,15 +1270,15 @@ function renderCallView() {
         <div class="participant-tile-name">Você</div>
         <div class="participant-mic-badge ${cm.micMuted ? 'muted' : ''}">${cm.micMuted ? ICONS.micOff : ICONS.mic}</div>
       </div>
-      <div class="participant-tile" data-speaking-key="peer">
+      <div class="participant-tile" data-speaking-key="${peer.id}">
         <div class="avatar avatar-lg" style="${avatarStyle(peer)}">${avatarInner(peer)}</div>
         <div class="participant-tile-name">${escapeHtml(peer.username)}</div>
         ${cm.state === 'calling' ? '<div class="participant-tile-name" style="font-weight:500;color:var(--text-tertiary);font-size:12px;">Chamando...</div>' : ''}
       </div>`;
-  }
 
-  const peerTileEl = dom.callViewBody.querySelector('[data-speaking-key="peer"]');
-  if (peerTileEl) peerTileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, peer));
+    const peerTileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(peer.id)}"]`);
+    if (peerTileEl) peerTileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, peer, 'voice'));
+  }
 
   const showControls = cm.state === 'calling' || cm.state === 'connected';
   dom.callViewControls.innerHTML = showControls ? `
@@ -1173,8 +1311,7 @@ function renderGroupCallView() {
   const cm = groupCallManager;
   if (!cm.group) return;
   const participants = cm.participantList();
-  const sharer = participants.find((p) => p.remoteSharing);
-  const isSharing = cm.sharingLocal || !!sharer;
+  const isSharing = cm.sharingLocal || participants.some((p) => p.remoteSharing);
 
   dom.callViewHeader.innerHTML = `
     <div>
@@ -1184,28 +1321,11 @@ function renderGroupCallView() {
     <div class="call-view-timer">${formatDuration(cm.elapsedSeconds())}</div>`;
 
   if (isSharing) {
-    const sharerName = sharer ? (sharer.user.username || 'Alguém') : 'Você';
-    dom.callViewBody.innerHTML = `
-      <div class="screenshare-panel">
-        <div class="screenshare-stage">
-          <div class="screenshare-label">${sharer ? `${escapeHtml(sharerName)} está compartilhando a tela` : 'Você está compartilhando sua tela'}</div>
-          <video id="screenshare-video" autoplay playsinline></video>
-        </div>
-        <div class="screenshare-strip">
-          <div class="screenshare-thumb" data-speaking-key="self">
-            <div class="avatar avatar-sm" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
-            <div class="screenshare-thumb-name">Você</div>
-          </div>
-          ${participants.map((p) => `
-            <div class="screenshare-thumb" data-speaking-key="${p.user.id}">
-              <div class="avatar avatar-sm" style="${avatarStyle(p.user)}">${avatarInner(p.user)}</div>
-              <div class="screenshare-thumb-name">${escapeHtml(p.user.username || '')}</div>
-            </div>`).join('')}
-        </div>
-      </div>`;
-    const videoEl = document.getElementById('screenshare-video');
-    const stream = sharer ? sharer.remoteScreenStream : cm.localScreenStream;
-    if (videoEl && stream) videoEl.srcObject = stream;
+    const allTiles = [
+      { id: 'self', user: state.currentUser, isSelf: true },
+      ...participants.map((p) => ({ id: p.user.id, user: p.user, isSelf: false })),
+    ];
+    renderScreenshareStage(collectShares(cm), allTiles);
   } else {
     const selfTile = `
       <div class="participant-tile" data-speaking-key="self">
@@ -1219,12 +1339,12 @@ function renderGroupCallView() {
         <div class="participant-tile-name">${escapeHtml(p.user.username || '')}</div>
       </div>`).join('');
     dom.callViewBody.innerHTML = selfTile + peerTiles;
-  }
 
-  participants.forEach((p) => {
-    const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(p.user.id)}"]`);
-    if (tileEl) tileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, p.user));
-  });
+    participants.forEach((p) => {
+      const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(p.user.id)}"]`);
+      if (tileEl) tileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, p.user, 'voice'));
+    });
+  }
 
   dom.callViewControls.innerHTML = `
     <div class="call-controls-pill">
@@ -1260,7 +1380,7 @@ function speakingLoop() {
 
   if (cm === callManager) {
     setSpeakingClass('self', callManager.isLocalSpeaking());
-    setSpeakingClass('peer', callManager.isRemoteSpeaking());
+    if (callManager.peer) setSpeakingClass(callManager.peer.id, callManager.isRemoteSpeaking());
   } else if (cm === groupCallManager) {
     setSpeakingClass('self', groupCallManager.isLocalSpeaking());
     groupCallManager.participantList().forEach((p) => {

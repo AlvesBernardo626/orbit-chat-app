@@ -3,6 +3,8 @@ import { toast } from './ui.js';
 import { SpeakingTracker } from './audioLevel.js';
 import { getStoredVolume } from './volume.js';
 
+function clampVolume(v) { return Math.min(1, Math.max(0, v)); }
+
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 class CallManager {
@@ -19,6 +21,7 @@ class CallManager {
     this.remoteSharing = false;
     this.remoteScreenStream = null;
     this._screenSender = null;
+    this._screenAudioSender = null;
     this._remoteAudioStream = null;
     this._localSpeakingTracker = null;
     this._remoteSpeakingTracker = null;
@@ -115,12 +118,14 @@ class CallManager {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       const track = stream.getVideoTracks()[0];
       if (!track) return;
       this.localScreenStream = stream;
       this.sharingLocal = true;
       this._screenSender = this.pc.addTrack(track, stream);
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) this._screenAudioSender = this.pc.addTrack(audioTrack, stream);
       track.onended = () => {
         if (this.sharingLocal) this.toggleScreenShare();
       };
@@ -136,6 +141,10 @@ class CallManager {
     if (this._screenSender) {
       try { this.pc.removeTrack(this._screenSender); } catch { /* already removed */ }
       this._screenSender = null;
+    }
+    if (this._screenAudioSender) {
+      try { this.pc.removeTrack(this._screenAudioSender); } catch { /* already removed */ }
+      this._screenAudioSender = null;
     }
     if (this.localScreenStream) {
       this.localScreenStream.getTracks().forEach((t) => t.stop());
@@ -159,9 +168,16 @@ class CallManager {
 
   setRemoteVolume(volume) {
     const audioEl = document.getElementById('remote-audio');
-    // HTMLMediaElement.volume only accepts 0..1 — it throws outside that
-    // range, so a slider that goes up to 200% needs clamping here.
-    if (audioEl) audioEl.volume = Math.min(1, Math.max(0, volume));
+    if (audioEl) audioEl.volume = clampVolume(volume);
+  }
+
+  // The screenshare <video> element is (re)created by the renderer on every
+  // render, so there's nothing to store a reference to here — the renderer
+  // re-applies the stored volume itself each time. This setter is only for
+  // a live drag of the slider while that same element is already mounted.
+  setRemoteShareVolume(volume) {
+    const videoEl = document.getElementById('screenshare-video');
+    if (videoEl) videoEl.volume = clampVolume(volume);
   }
 
   // ---- socket event handlers ----
@@ -271,16 +287,26 @@ class CallManager {
     };
     pc.ontrack = (event) => {
       if (event.track.kind === 'audio') {
-        if (!this._remoteAudioStream) this._remoteAudioStream = new MediaStream();
-        this._remoteAudioStream.addTrack(event.track);
-        const audioEl = document.getElementById('remote-audio');
-        if (audioEl) {
-          audioEl.srcObject = this._remoteAudioStream;
-          audioEl.muted = this.deafened;
-          audioEl.volume = this.peer ? Math.min(1, Math.max(0, getStoredVolume(this.peer.id))) : 1;
-          audioEl.play().catch(() => {});
+        // Voice negotiates at call setup, well before screen share is even
+        // possible to start — so the first audio track a peer ever sends is
+        // always the mic, and anything after that is the shared screen's
+        // own sound (system/tab audio), bundled into remoteScreenStream so
+        // it plays through the same <video> element as the screen video.
+        if (!this._remoteAudioStream) {
+          this._remoteAudioStream = new MediaStream();
+          this._remoteAudioStream.addTrack(event.track);
+          const audioEl = document.getElementById('remote-audio');
+          if (audioEl) {
+            audioEl.srcObject = this._remoteAudioStream;
+            audioEl.muted = this.deafened;
+            audioEl.volume = this.peer ? clampVolume(getStoredVolume(this.peer.id)) : 1;
+            audioEl.play().catch(() => {});
+          }
+          this._remoteSpeakingTracker = new SpeakingTracker(this._remoteAudioStream);
+        } else {
+          if (!this.remoteScreenStream) this.remoteScreenStream = new MediaStream();
+          this.remoteScreenStream.addTrack(event.track);
         }
-        if (!this._remoteSpeakingTracker) this._remoteSpeakingTracker = new SpeakingTracker(this._remoteAudioStream);
       } else if (event.track.kind === 'video') {
         if (!this.remoteScreenStream) this.remoteScreenStream = new MediaStream();
         this.remoteScreenStream.addTrack(event.track);
@@ -347,6 +373,7 @@ class CallManager {
     this.remoteSharing = false;
     this.sharingLocal = false;
     this._screenSender = null;
+    this._screenAudioSender = null;
     this.micMuted = false;
     this.deafened = false;
     this._iceQueue = [];

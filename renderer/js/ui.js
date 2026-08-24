@@ -22,6 +22,26 @@ export function avatarStyle(user) {
   return `background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});`;
 }
 
+const URL_PATTERN = /(https?:\/\/[^\s<>"]+)/g;
+
+// Splits on raw (unescaped) text so the URL regex never has to deal with
+// HTML entities, then escapes each piece separately — link text/href and
+// plain text both end up safely escaped either way.
+export function linkifyHtml(text) {
+  const raw = String(text ?? '');
+  let result = '';
+  let lastIndex = 0;
+  for (const match of raw.matchAll(URL_PATTERN)) {
+    const url = match[0];
+    result += escapeHtml(raw.slice(lastIndex, match.index));
+    const safeUrl = escapeHtml(url);
+    result += `<a href="${safeUrl}" data-ext-link="1" rel="noopener">${safeUrl}</a>`;
+    lastIndex = match.index + url.length;
+  }
+  result += escapeHtml(raw.slice(lastIndex));
+  return result;
+}
+
 export function avatarHtml(user, sizeClass) {
   const showInitials = !(user && user.avatar && user.avatar.type === 'image' && user.avatar.dataUrl);
   return `<div class="avatar ${sizeClass}" style="${avatarStyle(user)}">${showInitials ? escapeHtml(initials(user ? user.username : '')) : ''}</div>`;

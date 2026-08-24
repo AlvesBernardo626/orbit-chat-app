@@ -67,6 +67,13 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
     };
   }
 
+  /** groupId -> Set<userId> currently connected to that group's active call */
+  const groupCallParticipants = new Map();
+
+  function activeCallMemberIds(groupId) {
+    return groupCallParticipants.has(groupId) ? [...groupCallParticipants.get(groupId)] : [];
+  }
+
   function publicGroup(group) {
     if (!group) return null;
     return {
@@ -75,11 +82,21 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       icon: group.icon,
       createdBy: group.createdBy,
       members: group.members.map((id) => publicUser(db.getUserById(id))).filter(Boolean),
+      activeCallMemberIds: activeCallMemberIds(group.id),
     };
   }
 
-  /** groupId -> Set<userId> currently connected to that group's active call */
-  const groupCallParticipants = new Map();
+  // Broadcast to EVERY group member (not just people currently on the call)
+  // so the "who's on this call" facepile stays live even for someone just
+  // looking at the group's chat header.
+  function broadcastGroupCallRoster(groupId) {
+    const group = db.getGroupById(groupId);
+    if (!group) return;
+    const participantIds = activeCallMemberIds(groupId);
+    group.members.forEach((id) => {
+      io.to(`user:${id}`).emit('call:group-roster', { groupId, participantIds });
+    });
+  }
 
   function onlineGroupMembers(group, excludeUserId) {
     return group.members.filter((id) => id !== excludeUserId && presence.has(id) && presence.get(id).size > 0);
@@ -275,6 +292,7 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       onlineGroupMembers(group, currentUserId).forEach((id) => {
         io.to(`user:${id}`).emit('call:group-incoming', { group: publicGroup(group), from: publicUser(caller) });
       });
+      broadcastGroupCallRoster(groupId);
       ack && ack({ ok: true });
     });
 
@@ -290,6 +308,7 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       existing.forEach((id) => {
         io.to(`user:${id}`).emit('call:group-participant-joined', { groupId, user: publicUser(joiner) });
       });
+      broadcastGroupCallRoster(groupId);
       ack && ack({ ok: true, participants: existing.map((id) => publicUser(db.getUserById(id))) });
     });
 
@@ -303,6 +322,7 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
         });
         if (participants.size === 0) groupCallParticipants.delete(groupId);
       }
+      broadcastGroupCallRoster(groupId);
       ack && ack({ ok: true });
     });
 
@@ -376,6 +396,7 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
               io.to(`user:${id}`).emit('call:group-participant-left', { groupId, userId: currentUserId });
             });
             if (participants.size === 0) groupCallParticipants.delete(groupId);
+            broadcastGroupCallRoster(groupId);
           });
         }
       }

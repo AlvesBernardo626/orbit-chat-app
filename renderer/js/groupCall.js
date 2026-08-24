@@ -4,6 +4,7 @@ import { SpeakingTracker } from './audioLevel.js';
 import { getStoredVolume } from './volume.js';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+function clampVolume(v) { return Math.min(1, Math.max(0, v)); }
 
 class GroupCallManager {
   constructor() {
@@ -59,6 +60,16 @@ class GroupCallManager {
 
   acceptIncoming() {
     if (this.state !== 'ringing' || !this.group) return;
+    this._joinMesh();
+  }
+
+  // Used when the group's call roster shows people already on a call —
+  // join them directly instead of startGroupCall(), which would ring
+  // everyone (including the people already connected) all over again.
+  joinActiveCall(group) {
+    if (this.state !== 'idle') return;
+    this.group = group;
+    this.groupId = group.id;
     this._joinMesh();
   }
 
@@ -120,13 +131,15 @@ class GroupCallManager {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       const track = stream.getVideoTracks()[0];
       if (!track) return;
+      const audioTrack = stream.getAudioTracks()[0];
       this.localScreenStream = stream;
       this.sharingLocal = true;
       this.peers.forEach((entry, peerId) => {
         entry.screenSender = entry.pc.addTrack(track, stream);
+        if (audioTrack) entry.screenAudioSender = entry.pc.addTrack(audioTrack, stream);
       });
       track.onended = () => {
         if (this.sharingLocal) this.toggleScreenShare();
@@ -144,6 +157,10 @@ class GroupCallManager {
       if (entry.screenSender) {
         try { entry.pc.removeTrack(entry.screenSender); } catch { /* already gone */ }
         entry.screenSender = null;
+      }
+      if (entry.screenAudioSender) {
+        try { entry.pc.removeTrack(entry.screenAudioSender); } catch { /* already gone */ }
+        entry.screenAudioSender = null;
       }
     });
     if (this.localScreenStream) {
@@ -173,9 +190,16 @@ class GroupCallManager {
 
   setPeerVolume(peerId, volume) {
     const entry = this.peers.get(peerId);
-    // HTMLMediaElement.volume only accepts 0..1 — it throws outside that
-    // range, so a slider that goes up to 200% needs clamping here.
-    if (entry && entry.audioEl) entry.audioEl.volume = Math.min(1, Math.max(0, volume));
+    if (entry && entry.audioEl) entry.audioEl.volume = clampVolume(volume);
+  }
+
+  // The screenshare <video> element is (re)created by the renderer on every
+  // render, so there's no stored reference here — the renderer re-applies
+  // the stored volume itself each time. This is only for a live slider drag
+  // while that element is already mounted and showing this peer's share.
+  setPeerShareVolume(volume) {
+    const videoEl = document.getElementById('screenshare-video');
+    if (videoEl) videoEl.volume = clampVolume(volume);
   }
 
   // ---- socket handlers ----
@@ -265,7 +289,7 @@ class GroupCallManager {
       return entry;
     }
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    entry = { pc, user, iceQueue: [], remoteAudioStream: null, remoteScreenStream: null, remoteSharing: false, screenSender: null, audioEl: null, speakingTracker: null };
+    entry = { pc, user, iceQueue: [], remoteAudioStream: null, remoteScreenStream: null, remoteSharing: false, screenSender: null, screenAudioSender: null, audioEl: null, speakingTracker: null };
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         emit('call:group-ice-candidate', { groupId: this.groupId, to: user.id, candidate: event.candidate }).catch(() => {});
@@ -278,19 +302,29 @@ class GroupCallManager {
     };
     pc.ontrack = (event) => {
       if (event.track.kind === 'audio') {
-        if (!entry.remoteAudioStream) entry.remoteAudioStream = new MediaStream();
-        entry.remoteAudioStream.addTrack(event.track);
-        if (!entry.audioEl) {
-          const audioEl = document.createElement('audio');
-          audioEl.autoplay = true;
-          audioEl.muted = this.deafened;
-          audioEl.volume = Math.min(1, Math.max(0, getStoredVolume(user.id)));
-          document.body.appendChild(audioEl);
-          entry.audioEl = audioEl;
+        // Voice negotiates at call setup, well before screen share is even
+        // possible to start — so the first audio track from a peer is
+        // always their mic, and anything after that is their shared
+        // screen's own sound, bundled into remoteScreenStream so it plays
+        // through the same <video> element as the screen video.
+        if (!entry.remoteAudioStream) {
+          entry.remoteAudioStream = new MediaStream();
+          entry.remoteAudioStream.addTrack(event.track);
+          if (!entry.audioEl) {
+            const audioEl = document.createElement('audio');
+            audioEl.autoplay = true;
+            audioEl.muted = this.deafened;
+            audioEl.volume = clampVolume(getStoredVolume(user.id));
+            document.body.appendChild(audioEl);
+            entry.audioEl = audioEl;
+          }
+          entry.audioEl.srcObject = entry.remoteAudioStream;
+          entry.audioEl.play().catch(() => {});
+          entry.speakingTracker = new SpeakingTracker(entry.remoteAudioStream);
+        } else {
+          if (!entry.remoteScreenStream) entry.remoteScreenStream = new MediaStream();
+          entry.remoteScreenStream.addTrack(event.track);
         }
-        entry.audioEl.srcObject = entry.remoteAudioStream;
-        entry.audioEl.play().catch(() => {});
-        if (!entry.speakingTracker) entry.speakingTracker = new SpeakingTracker(entry.remoteAudioStream);
       } else if (event.track.kind === 'video') {
         if (!entry.remoteScreenStream) entry.remoteScreenStream = new MediaStream();
         entry.remoteScreenStream.addTrack(event.track);
@@ -319,6 +353,8 @@ class GroupCallManager {
     this.localStream.getAudioTracks().forEach((track) => entry.pc.addTrack(track, this.localStream));
     if (this.sharingLocal && this.localScreenStream) {
       entry.screenSender = entry.pc.addTrack(this.localScreenStream.getVideoTracks()[0], this.localScreenStream);
+      const audioTrack = this.localScreenStream.getAudioTracks()[0];
+      if (audioTrack) entry.screenAudioSender = entry.pc.addTrack(audioTrack, this.localScreenStream);
     }
   }
 

@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('orbit', {
   avatar: {
     pick: () => ipcRenderer.invoke('avatar:pick'),
   },
+  external: {
+    open: (url) => ipcRenderer.invoke('shell:open-external', url),
+  },
   screenShare: {
     onPickRequest: (callback) => {
       ipcRenderer.on('screenshare:pick-request', (_event, sources) => callback(sources));

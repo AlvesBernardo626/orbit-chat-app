@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, nativeImage, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, nativeImage, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -77,6 +77,19 @@ ipcMain.handle('avatar:pick', async () => {
   return resized.toDataURL();
 });
 
+// Chat messages come from other users and may contain links — never let
+// them navigate this window; only hand http(s) URLs to the OS browser.
+ipcMain.handle('shell:open-external', (event, url) => {
+  try {
+    const parsed = new URL(String(url));
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    shell.openExternal(parsed.href);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle('screenshare:pick-response', (event, sourceId) => {
   if (pendingSourceResolve) {
     pendingSourceResolve(sourceId || null);
@@ -125,6 +138,14 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Belt-and-suspenders: chat/link content is untrusted, so even if a link
+  // ever slipped past the renderer's own click interception, this window
+  // itself should never navigate away from the app or open a new window.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow.webContents.getURL()) event.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
 app.whenReady().then(async () => {
