@@ -22,6 +22,20 @@ export function avatarStyle(user) {
   return `background:linear-gradient(135deg, ${colors[0]}, ${colors[1]});`;
 }
 
+// Empty string (not a gradient fallback) so the caller's CSS class default
+// banner gradient shows through untouched when there's no custom banner.
+export function bannerStyle(user) {
+  if (user && user.banner && user.banner.type === 'image' && user.banner.dataUrl) {
+    return `background-image:url('${user.banner.dataUrl}'); background-size:cover; background-position:center;`;
+  }
+  return '';
+}
+
+export function formatJoinDate(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 const URL_PATTERN = /(https?:\/\/[^\s<>"]+)/g;
 
 // Splits on raw (unescaped) text so the URL regex never has to deal with

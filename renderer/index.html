@@ -97,17 +97,25 @@
         <div class="profile-card-wrap">
           <h1>Perfil</h1>
           <div class="profile-card">
-            <div class="profile-banner"></div>
+            <div id="profile-banner" class="profile-banner">
+              <button id="profile-banner-edit" class="banner-edit-badge" title="Alterar banner">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5c0-1 .8-1.8 1.8-1.8h1.4l1-1.5h7.6l1 1.5h1.4c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8H5.8C4.8 19.3 4 18.5 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.2"/></svg>
+                <span>Alterar banner</span>
+              </button>
+            </div>
             <div class="profile-body">
               <div class="profile-avatar-wrap">
                 <div id="profile-avatar" class="avatar avatar-xl avatar-ring"></div>
-                <button id="profile-avatar-edit" class="avatar-edit-badge" title="Alterar foto">
+                <button id="profile-avatar-edit" class="avatar-edit-badge" title="Alterar foto (aceita GIF)">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5c0-1 .8-1.8 1.8-1.8h1.4l1-1.5h7.6l1 1.5h1.4c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8H5.8C4.8 19.3 4 18.5 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.2"/></svg>
                 </button>
               </div>
 
               <input id="profile-name-input" class="profile-name-input" maxlength="24" placeholder="Nome de exibição">
-              <div id="profile-tag" class="profile-tag"></div>
+              <div class="profile-tag-row">
+                <span>#</span>
+                <input id="profile-tag-input" class="profile-tag-input" maxlength="4" inputmode="numeric" placeholder="0000">
+              </div>
 
               <div class="section-label" style="margin-top:22px;">Status</div>
               <div class="status-options" id="status-options">
@@ -285,12 +293,52 @@
     </div>
   </div>
 
-  <!-- Per-user call volume (right-click a participant's icon in a call) -->
-  <div id="volume-popover" class="volume-popover" hidden>
-    <div id="volume-popover-name" class="volume-popover-name"></div>
-    <div class="volume-popover-row">
-      <input id="volume-slider" type="range" min="0" max="200" step="1" value="100">
-      <span id="volume-popover-value" class="volume-popover-value">100%</span>
+  <!-- Right-click someone's avatar anywhere in the app: view their profile,
+       plus (only inside a call) that person's voice/share volume slider. -->
+  <div id="avatar-context-menu" class="avatar-context-menu" hidden>
+    <button id="actx-view-profile" class="avatar-context-item">Perfil de Usuário</button>
+    <div id="actx-volume-section" class="avatar-context-volume" hidden>
+      <div class="avatar-context-divider"></div>
+      <div id="volume-popover-name" class="volume-popover-name"></div>
+      <div class="volume-popover-row">
+        <input id="volume-slider" type="range" min="0" max="200" step="1" value="100">
+        <span id="volume-popover-value" class="volume-popover-value">100%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full profile view for another user (or yourself), opened from the
+       context menu above. -->
+  <div id="user-profile-modal" class="modal-overlay" hidden>
+    <div class="user-profile-card">
+      <button id="user-profile-close" class="modal-close-btn" title="Fechar">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 5l14 14M19 5 5 19"/></svg>
+      </button>
+      <div id="user-profile-banner" class="user-profile-banner"></div>
+      <div class="user-profile-body">
+        <div class="user-profile-avatar-wrap">
+          <div id="user-profile-avatar" class="avatar avatar-xl avatar-ring"></div>
+          <span id="user-profile-status-dot" class="status-dot user-profile-status-dot"></span>
+        </div>
+        <div id="user-profile-name" class="user-profile-name"></div>
+        <div class="user-profile-subline">
+          <span id="user-profile-tag"></span>
+          <span class="user-profile-dot-sep">•</span>
+          <span id="user-profile-status-label"></span>
+        </div>
+
+        <div id="user-profile-bio-section" class="user-profile-section" hidden>
+          <div class="user-profile-section-title">Sobre</div>
+          <div id="user-profile-bio" class="user-profile-bio"></div>
+        </div>
+
+        <div class="user-profile-section">
+          <div class="user-profile-section-title">Membro desde</div>
+          <div id="user-profile-member-since" class="user-profile-member-since"></div>
+        </div>
+
+        <button id="user-profile-message-btn" class="btn btn-primary btn-block">Mensagem</button>
+      </div>
     </div>
   </div>
 

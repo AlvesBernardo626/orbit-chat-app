@@ -45,8 +45,10 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       username: user.username,
       tag: user.tag,
       avatar: user.avatar,
+      banner: user.banner,
       status: effectiveStatus(user),
       statusMessage: user.statusMessage,
+      createdAt: user.createdAt,
     };
     if (user.friendshipId) result.friendshipId = user.friendshipId;
     return result;
@@ -62,8 +64,10 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       username: user.username,
       tag: user.tag,
       avatar: user.avatar,
+      banner: user.banner,
       status: user.status,
       statusMessage: user.statusMessage,
+      createdAt: user.createdAt,
     };
   }
 
@@ -140,9 +144,10 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
 
     socket.on('profile:update', (patch, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const user = db.updateUserProfile(currentUserId, patch);
-      ack && ack({ user: selfUser(user) });
-      broadcastProfile(user);
+      const result = db.updateUserProfile(currentUserId, patch);
+      if (result.error) return ack && ack({ error: result.error });
+      ack && ack({ user: selfUser(result.user) });
+      broadcastProfile(result.user);
     });
 
     socket.on('status:update', ({ status }, ack) => {

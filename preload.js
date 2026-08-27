@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('orbit', {
     clear: () => ipcRenderer.invoke('session:clear'),
   },
   avatar: {
-    pick: () => ipcRenderer.invoke('avatar:pick'),
+    pick: (kind) => ipcRenderer.invoke('avatar:pick', kind),
   },
   external: {
     open: (url) => ipcRenderer.invoke('shell:open-external', url),

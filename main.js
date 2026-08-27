@@ -64,17 +64,32 @@ ipcMain.handle('session:clear', () => {
   return true;
 });
 
-ipcMain.handle('avatar:pick', async () => {
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+// kind: 'avatar' (square) or 'banner' (wide) — both accept animated GIFs.
+ipcMain.handle('avatar:pick', async (event, kind) => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Escolher foto de perfil',
+    title: kind === 'banner' ? 'Escolher banner' : 'Escolher foto de perfil',
     filters: [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
     properties: ['openFile'],
   });
   if (result.canceled || !result.filePaths[0]) return null;
-  const image = nativeImage.createFromPath(result.filePaths[0]);
+  const filePath = result.filePaths[0];
+  if (fs.statSync(filePath).size > MAX_IMAGE_BYTES) return { error: 'too_large' };
+
+  if (path.extname(filePath).toLowerCase() === '.gif') {
+    // nativeImage.resize() flattens animated GIFs to a single frame, so
+    // animated ones are passed through as-is (still capped in size above)
+    // instead of round-tripping through it.
+    const buffer = fs.readFileSync(filePath);
+    return { dataUrl: `data:image/gif;base64,${buffer.toString('base64')}` };
+  }
+
+  const image = nativeImage.createFromPath(filePath);
   if (image.isEmpty()) return null;
-  const resized = image.resize({ width: 128, height: 128, quality: 'good' });
-  return resized.toDataURL();
+  const size = kind === 'banner' ? { width: 640, height: 240 } : { width: 128, height: 128 };
+  const resized = image.resize({ ...size, quality: 'good' });
+  return { dataUrl: resized.toDataURL() };
 });
 
 // Chat messages come from other users and may contain links — never let

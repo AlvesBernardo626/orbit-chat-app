@@ -31,6 +31,7 @@ function createDb(dbFilePath) {
       username: trimmed,
       tag,
       avatar: { type: 'initials', color: pickColor(trimmed + tag) },
+      banner: { type: 'gradient' },
       status: 'online',
       statusMessage: '',
       createdAt: Date.now(),
@@ -66,13 +67,36 @@ function createDb(dbFilePath) {
       .value();
   }
 
-  function updateUserProfile(id, { avatar, statusMessage, username }) {
+  function updateUserProfile(id, { avatar, banner, statusMessage, username, tag }) {
+    const current = getUserById(id);
+    if (!current) return { error: 'not_found' };
     const patch = {};
     if (avatar !== undefined) patch.avatar = avatar;
-    if (statusMessage !== undefined) patch.statusMessage = statusMessage;
+    if (banner !== undefined) patch.banner = banner;
+    if (statusMessage !== undefined) patch.statusMessage = String(statusMessage).slice(0, 140);
     if (username !== undefined) patch.username = username.trim().slice(0, 24);
+
+    let paddedTag = current.tag;
+    if (tag !== undefined) {
+      const cleanTag = String(tag).trim();
+      if (!/^\d{1,4}$/.test(cleanTag)) return { error: 'invalid_tag' };
+      paddedTag = cleanTag.padStart(4, '0');
+      patch.tag = paddedTag;
+    }
+
+    // Re-check the (username, tag) pair whenever either half changes —
+    // changing just the username can just as easily collide with someone
+    // else who already holds that name under your current tag.
+    if (patch.username !== undefined || patch.tag !== undefined) {
+      const finalUsername = patch.username !== undefined ? patch.username : current.username;
+      const clash = db.get('users')
+        .find((u) => u.id !== id && u.username.toLowerCase() === finalUsername.toLowerCase() && u.tag === paddedTag)
+        .value();
+      if (clash) return { error: 'tag_taken' };
+    }
+
     db.get('users').find({ id }).assign(patch).write();
-    return getUserById(id);
+    return { user: getUserById(id) };
   }
 
   function updateUserStatus(id, status) {

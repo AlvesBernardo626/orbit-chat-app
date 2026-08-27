@@ -3,8 +3,8 @@ import { callManager } from './call.js';
 import { groupCallManager } from './groupCall.js';
 import { getStoredVolume, setStoredVolume, getStoredShareVolume, setStoredShareVolume } from './volume.js';
 import {
-  escapeHtml, linkifyHtml, initials, avatarStyle, statusLabel, statusDotClass,
-  formatTime, formatDayTime, toast, el,
+  escapeHtml, linkifyHtml, initials, avatarStyle, bannerStyle, statusLabel, statusDotClass,
+  formatTime, formatDayTime, formatJoinDate, toast, el,
 } from './ui.js';
 
 const MAX_GROUP_MEMBERS = 10;
@@ -32,6 +32,7 @@ const state = {
   volumePopoverTarget: null, // userId currently shown in the volume popover
   volumePopoverMode: 'voice', // 'voice' | 'share'
   focusedShareId: null, // 'self' | userId — which of possibly several simultaneous screen shares is in the big stage
+  contextMenuUser: null, // full user object the avatar-context-menu is currently pointed at
 };
 
 const dom = {
@@ -58,10 +59,12 @@ const dom = {
   offlineList: document.getElementById('offline-list'),
   friendsEmptyState: document.getElementById('friends-empty-state'),
 
+  profileBanner: document.getElementById('profile-banner'),
+  profileBannerEdit: document.getElementById('profile-banner-edit'),
   profileAvatar: document.getElementById('profile-avatar'),
   profileAvatarEdit: document.getElementById('profile-avatar-edit'),
   profileNameInput: document.getElementById('profile-name-input'),
-  profileTag: document.getElementById('profile-tag'),
+  profileTagInput: document.getElementById('profile-tag-input'),
   statusOptions: document.getElementById('status-options'),
   profileBioInput: document.getElementById('profile-bio-input'),
   profileSaveBtn: document.getElementById('profile-save-btn'),
@@ -127,10 +130,25 @@ const dom = {
   groupSettingsCancel: document.getElementById('group-settings-cancel'),
   groupSettingsSave: document.getElementById('group-settings-save'),
 
-  volumePopover: document.getElementById('volume-popover'),
+  avatarContextMenu: document.getElementById('avatar-context-menu'),
+  actxViewProfile: document.getElementById('actx-view-profile'),
+  actxVolumeSection: document.getElementById('actx-volume-section'),
   volumePopoverName: document.getElementById('volume-popover-name'),
   volumeSlider: document.getElementById('volume-slider'),
   volumePopoverValue: document.getElementById('volume-popover-value'),
+
+  userProfileModal: document.getElementById('user-profile-modal'),
+  userProfileClose: document.getElementById('user-profile-close'),
+  userProfileBanner: document.getElementById('user-profile-banner'),
+  userProfileAvatar: document.getElementById('user-profile-avatar'),
+  userProfileStatusDot: document.getElementById('user-profile-status-dot'),
+  userProfileName: document.getElementById('user-profile-name'),
+  userProfileTag: document.getElementById('user-profile-tag'),
+  userProfileStatusLabel: document.getElementById('user-profile-status-label'),
+  userProfileBioSection: document.getElementById('user-profile-bio-section'),
+  userProfileBio: document.getElementById('user-profile-bio'),
+  userProfileMemberSince: document.getElementById('user-profile-member-since'),
+  userProfileMessageBtn: document.getElementById('user-profile-message-btn'),
 };
 
 // ---------------- Icons ----------------
@@ -337,6 +355,13 @@ function updateNavUnreadDot() {
   dom.chatUnreadDot.hidden = !((dmUnread || groupUnread) && state.activeTab !== 'chat');
 }
 
+async function pickImageOrToast(kind) {
+  const result = await window.orbit.avatar.pick(kind);
+  if (!result) return null;
+  if (result.error === 'too_large') { toast('Arquivo muito grande (máx. 8MB)', 'err'); return null; }
+  return result.dataUrl || null;
+}
+
 function wireStaticHandlers() {
   document.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
@@ -350,7 +375,7 @@ function wireStaticHandlers() {
 
   // Profile
   dom.profileAvatarEdit.addEventListener('click', async () => {
-    const dataUrl = await window.orbit.avatar.pick();
+    const dataUrl = await pickImageOrToast('avatar');
     if (!dataUrl) return;
     try {
       const res = await emit('profile:update', { avatar: { type: 'image', dataUrl } });
@@ -359,6 +384,19 @@ function wireStaticHandlers() {
       toast('Foto de perfil atualizada', 'ok');
     } catch {
       toast('Não foi possível atualizar a foto', 'err');
+    }
+  });
+
+  dom.profileBannerEdit.addEventListener('click', async () => {
+    const dataUrl = await pickImageOrToast('banner');
+    if (!dataUrl) return;
+    try {
+      const res = await emit('profile:update', { banner: { type: 'image', dataUrl } });
+      state.currentUser = res.user;
+      renderProfile();
+      toast('Banner atualizado', 'ok');
+    } catch {
+      toast('Não foi possível atualizar o banner', 'err');
     }
   });
 
@@ -378,16 +416,22 @@ function wireStaticHandlers() {
   dom.profileSaveBtn.addEventListener('click', async () => {
     const username = dom.profileNameInput.value.trim();
     const statusMessage = dom.profileBioInput.value.trim();
+    const tagRaw = dom.profileTagInput.value.trim();
     if (!username) { toast('O nome não pode ficar vazio', 'err'); return; }
+    if (!/^\d{1,4}$/.test(tagRaw)) { toast('A tag deve ter de 1 a 4 números', 'err'); return; }
     try {
-      const res = await emit('profile:update', { username, statusMessage });
+      const res = await emit('profile:update', { username, statusMessage, tag: tagRaw });
       state.currentUser = res.user;
       renderProfile();
       dom.profileSaveHint.textContent = 'Alterações salvas';
       dom.profileSaveHint.classList.add('show');
       setTimeout(() => dom.profileSaveHint.classList.remove('show'), 2200);
-    } catch {
-      toast('Não foi possível salvar o perfil', 'err');
+    } catch (err) {
+      const messages = {
+        invalid_tag: 'A tag deve ter de 1 a 4 números.',
+        tag_taken: 'Essa tag já está em uso por outra pessoa com esse mesmo nome.',
+      };
+      toast(messages[err.message] || 'Não foi possível salvar o perfil', 'err');
     }
   });
 
@@ -436,14 +480,20 @@ function wireStaticHandlers() {
   dom.groupSettingsCancel.addEventListener('click', closeGroupSettingsModal);
   dom.groupSettingsSave.addEventListener('click', confirmGroupSettings);
   dom.groupSettingsAvatarEdit.addEventListener('click', async () => {
-    const dataUrl = await window.orbit.avatar.pick();
+    const dataUrl = await pickImageOrToast('avatar');
     if (!dataUrl) return;
     dom.groupSettingsAvatar.style.cssText = `background-image:url('${dataUrl}');`;
     dom.groupSettingsAvatar.textContent = '';
     dom.groupSettingsAvatar.dataset.pendingIcon = dataUrl;
   });
 
-  // Per-user call volume popover (voice) / per-share volume popover (screen share audio)
+  // Avatar right-click context menu: "Perfil de Usuário" always, plus (only
+  // inside a call) that person's voice/share volume slider underneath.
+  dom.actxViewProfile.addEventListener('click', () => {
+    const user = state.contextMenuUser;
+    closeAvatarContextMenu();
+    if (user) openUserProfile(user);
+  });
   dom.volumeSlider.addEventListener('input', () => {
     if (!state.volumePopoverTarget) return;
     const pct = Number(dom.volumeSlider.value);
@@ -454,10 +504,16 @@ function wireStaticHandlers() {
     applyLiveVolume(state.volumePopoverTarget, volume, state.volumePopoverMode);
   });
   document.addEventListener('mousedown', (e) => {
-    if (!dom.volumePopover.hidden && !dom.volumePopover.contains(e.target)) closeVolumePopover();
+    if (!dom.avatarContextMenu.hidden && !dom.avatarContextMenu.contains(e.target)) closeAvatarContextMenu();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !dom.volumePopover.hidden) closeVolumePopover();
+    if (e.key === 'Escape' && !dom.avatarContextMenu.hidden) closeAvatarContextMenu();
+  });
+
+  // User profile viewer
+  dom.userProfileClose.addEventListener('click', closeUserProfile);
+  dom.userProfileModal.addEventListener('click', (e) => {
+    if (e.target === dom.userProfileModal) closeUserProfile();
   });
 }
 
@@ -479,27 +535,95 @@ function applyLiveVolume(userId, volume, mode) {
   }
 }
 
-function openVolumePopover(evt, user, mode = 'voice') {
+// volumeMode: null (just the profile item) or 'voice'/'share' (also shows
+// that person's call volume slider — only meaningful from inside a call).
+function openAvatarContextMenu(evt, user, volumeMode = null) {
   evt.preventDefault();
   evt.stopPropagation();
-  state.volumePopoverTarget = user.id;
-  state.volumePopoverMode = mode;
-  const stored = mode === 'share' ? getStoredShareVolume(user.id) : getStoredVolume(user.id);
-  const pct = Math.round(stored * 100);
-  dom.volumePopoverName.textContent = mode === 'share' ? `Transmissão de ${user.username || 'Usuário'}` : (user.username || 'Usuário');
-  dom.volumeSlider.value = String(pct);
-  dom.volumePopoverValue.textContent = `${pct}%`;
-  dom.volumePopover.hidden = false;
-  const left = Math.min(evt.clientX, window.innerWidth - 216);
-  const top = Math.min(evt.clientY, window.innerHeight - 96);
-  dom.volumePopover.style.left = `${Math.max(8, left)}px`;
-  dom.volumePopover.style.top = `${Math.max(8, top)}px`;
+  state.contextMenuUser = user;
+  state.volumePopoverTarget = volumeMode ? user.id : null;
+  state.volumePopoverMode = volumeMode || 'voice';
+
+  dom.actxVolumeSection.hidden = !volumeMode;
+  if (volumeMode) {
+    const stored = volumeMode === 'share' ? getStoredShareVolume(user.id) : getStoredVolume(user.id);
+    const pct = Math.round(stored * 100);
+    dom.volumePopoverName.textContent = volumeMode === 'share' ? `Transmissão de ${user.username || 'Usuário'}` : (user.username || 'Usuário');
+    dom.volumeSlider.value = String(pct);
+    dom.volumePopoverValue.textContent = `${pct}%`;
+  }
+
+  dom.avatarContextMenu.hidden = false;
+  const left = Math.min(evt.clientX, window.innerWidth - 220);
+  const top = Math.min(evt.clientY, window.innerHeight - (volumeMode ? 160 : 60));
+  dom.avatarContextMenu.style.left = `${Math.max(8, left)}px`;
+  dom.avatarContextMenu.style.top = `${Math.max(8, top)}px`;
 }
 
-function closeVolumePopover() {
-  dom.volumePopover.hidden = true;
+function closeAvatarContextMenu() {
+  dom.avatarContextMenu.hidden = true;
+  state.contextMenuUser = null;
   state.volumePopoverTarget = null;
   state.volumePopoverMode = 'voice';
+}
+
+// ---------------- User profile viewer ----------------
+function openUserProfile(user) {
+  dom.userProfileBanner.style.cssText = bannerStyle(user);
+  dom.userProfileAvatar.style.cssText = avatarStyle(user);
+  dom.userProfileAvatar.textContent = avatarInner(user);
+  dom.userProfileStatusDot.className = `status-dot user-profile-status-dot ${statusDotClass(user.status)}`;
+  dom.userProfileName.textContent = user.username;
+  dom.userProfileTag.textContent = `#${user.tag}`;
+  dom.userProfileStatusLabel.textContent = user.status === 'offline' ? 'Offline' : statusLabel(user.status);
+
+  const bio = user.statusMessage && user.statusMessage.trim();
+  dom.userProfileBioSection.hidden = !bio;
+  if (bio) dom.userProfileBio.textContent = bio;
+
+  dom.userProfileMemberSince.textContent = formatJoinDate(user.createdAt);
+
+  const isSelf = state.currentUser && user.id === state.currentUser.id;
+  dom.userProfileMessageBtn.hidden = isSelf;
+  dom.userProfileMessageBtn.onclick = () => {
+    closeUserProfile();
+    switchTab('chat');
+    selectConversation(user.id);
+  };
+
+  dom.userProfileModal.hidden = false;
+}
+
+function closeUserProfile() {
+  dom.userProfileModal.hidden = true;
+}
+
+// Looks up a full user object (avatar/banner/status/createdAt/...) from
+// whatever list already has it loaded, for the "Perfil de Usuário"
+// right-click — friends, pending requests, or a group's member list.
+function findKnownUser(id) {
+  if (state.currentUser && state.currentUser.id === id) return state.currentUser;
+  for (const list of [state.friends, state.incoming, state.outgoing]) {
+    const found = list.find((u) => u.id === id);
+    if (found) return found;
+  }
+  for (const group of state.groups) {
+    const found = group.members.find((m) => m.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+
+// Wires "Perfil de Usuário" (no volume section) on every element carrying
+// data-profile="<userId>" inside the given container — call this after
+// (re)rendering that container's innerHTML.
+function wireProfileContextMenus(container) {
+  container.querySelectorAll('[data-profile]').forEach((el) => {
+    el.addEventListener('contextmenu', (e) => {
+      const user = findKnownUser(el.dataset.profile);
+      if (user) openAvatarContextMenu(e, user, null);
+    });
+  });
 }
 
 function activeCallManager() {
@@ -589,6 +713,8 @@ function renderFriends() {
       requestCall(friend);
     });
   });
+
+  wireProfileContextMenus(document.getElementById('tab-friends'));
 }
 
 function friendRowHtml(u) {
@@ -596,7 +722,7 @@ function friendRowHtml(u) {
   const sub = isOffline ? 'Offline' : (u.statusMessage || statusLabel(u.status));
   return `
   <div class="friend-row ${isOffline ? 'offline' : ''}">
-    <div class="friend-row-avatar">
+    <div class="friend-row-avatar" data-profile="${u.id}">
       <div class="avatar avatar-md" style="${avatarStyle(u)}">${avatarInner(u)}</div>
       <span class="status-dot ${statusDotClass(u.status)}"></span>
     </div>
@@ -614,7 +740,7 @@ function friendRowHtml(u) {
 function friendRequestRowHtml(u, isIncoming) {
   return `
   <div class="friend-row">
-    <div class="friend-row-avatar">
+    <div class="friend-row-avatar" data-profile="${u.id}">
       <div class="avatar avatar-md" style="${avatarStyle(u)}">${avatarInner(u)}</div>
     </div>
     <div class="friend-row-info">
@@ -668,10 +794,11 @@ function iconChat() {
 function renderProfile() {
   const u = state.currentUser;
   if (!u) return;
+  dom.profileBanner.style.cssText = bannerStyle(u);
   dom.profileAvatar.style.cssText = avatarStyle(u);
   dom.profileAvatar.textContent = avatarInner(u);
   dom.profileNameInput.value = u.username;
-  dom.profileTag.textContent = `#${u.tag}`;
+  dom.profileTagInput.value = u.tag;
   dom.statusOptions.querySelectorAll('.status-option').forEach((opt) => {
     opt.classList.toggle('selected', opt.dataset.status === u.status);
   });
@@ -705,6 +832,8 @@ function renderDmList() {
   dom.dmListItems.querySelectorAll('[data-group]').forEach((rowEl) => {
     rowEl.addEventListener('click', () => selectGroupConversation(rowEl.dataset.group));
   });
+
+  wireProfileContextMenus(dom.dmListItems);
 }
 
 function dmRowHtml({ id, entity: friend, lastMsg, unread }) {
@@ -716,7 +845,7 @@ function dmRowHtml({ id, entity: friend, lastMsg, unread }) {
   const selected = state.selectedType === 'dm' && state.selectedPeerId === id;
   return `
   <div class="dm-row ${selected ? 'selected' : ''}" data-peer="${id}">
-    <div class="dm-row-avatar">
+    <div class="dm-row-avatar" data-profile="${id}">
       <div class="avatar avatar-md" style="${avatarStyle(friend)}">${avatarInner(friend)}</div>
       <span class="status-dot ${statusDotClass(friend.status)}"></span>
     </div>
@@ -860,7 +989,7 @@ function renderChatHeader(friend) {
   const inCallWithFriend = callManager.state !== 'idle' && callManager.peer && callManager.peer.id === friend.id;
   dom.chatHeader.innerHTML = `
     <div class="chat-header-user">
-      <div class="chat-header-avatar">
+      <div class="chat-header-avatar" data-profile="${friend.id}">
         <div class="avatar avatar-sm" style="${avatarStyle(friend)}">${avatarInner(friend)}</div>
         <span class="status-dot ${statusDotClass(friend.status)}"></span>
       </div>
@@ -876,6 +1005,7 @@ function renderChatHeader(friend) {
 
   document.getElementById('chat-call-btn').addEventListener('click', () => requestCall(friend));
   document.getElementById('chat-share-btn').addEventListener('click', () => requestScreenShare(friend));
+  wireProfileContextMenus(dom.chatHeader);
 
   if (inCallWithFriend) {
     document.getElementById('chat-call-btn').classList.add('active');
@@ -984,7 +1114,7 @@ function renderChatMessages() {
     }
     return `
       <div class="msg-row">
-        <div class="avatar msg-avatar" style="${avatarStyle(friend)}">${friend ? avatarInner(friend) : ''}</div>
+        <div class="avatar msg-avatar" style="${avatarStyle(friend)}" ${friend ? `data-profile="${friend.id}"` : ''}>${friend ? avatarInner(friend) : ''}</div>
         <div class="msg-body">
           <div class="msg-meta"><span class="msg-author">${escapeHtml(friend ? friend.username : '')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
           <div class="msg-text">${linkifyHtml(m.text)}</div>
@@ -993,6 +1123,7 @@ function renderChatMessages() {
   }).join('');
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
   wireMessageLinks();
+  wireProfileContextMenus(dom.chatMessages);
 }
 
 function renderGroupChatMessages() {
@@ -1007,7 +1138,7 @@ function renderGroupChatMessages() {
     const sender = group ? group.members.find((mem) => mem.id === m.from) : null;
     return `
       <div class="msg-row">
-        <div class="avatar msg-avatar" style="${sender ? avatarStyle(sender) : ''}">${sender ? avatarInner(sender) : ''}</div>
+        <div class="avatar msg-avatar" style="${sender ? avatarStyle(sender) : ''}" ${sender ? `data-profile="${sender.id}"` : ''}>${sender ? avatarInner(sender) : ''}</div>
         <div class="msg-body">
           <div class="msg-meta"><span class="msg-author">${escapeHtml(sender ? sender.username : 'Alguém')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
           <div class="msg-text">${linkifyHtml(m.text)}</div>
@@ -1016,6 +1147,7 @@ function renderGroupChatMessages() {
   }).join('');
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
   wireMessageLinks();
+  wireProfileContextMenus(dom.chatMessages);
 }
 
 // Links in chat must never navigate this window (see main.js's
@@ -1068,7 +1200,7 @@ function onCallUpdate(cm) {
     state.pendingAutoShare = null;
     cm.toggleScreenShare();
   }
-  if (cm.state === 'idle') { state.pendingAutoShare = null; state.focusedShareId = null; closeVolumePopover(); }
+  if (cm.state === 'idle') { state.pendingAutoShare = null; state.focusedShareId = null; closeAvatarContextMenu(); }
 
   updateRingtone();
   renderIncomingModal();
@@ -1098,7 +1230,7 @@ function renderIncomingModal() {
 
 // ---------------- Group call UI ----------------
 function onGroupCallUpdate() {
-  if (groupCallManager.state === 'idle') { state.focusedShareId = null; closeVolumePopover(); }
+  if (groupCallManager.state === 'idle') { state.focusedShareId = null; closeAvatarContextMenu(); }
   updateRingtone();
   renderIncomingGroupModal();
   renderChatMain();
@@ -1174,7 +1306,7 @@ function focusedShare(shares) {
 
 function switchFocusedShare(shareId) {
   state.focusedShareId = shareId;
-  closeVolumePopover();
+  closeAvatarContextMenu();
   renderChatMain();
 }
 
@@ -1233,13 +1365,13 @@ function renderScreenshareStage(shares, allTiles) {
   allTiles.forEach((t) => {
     if (t.isSelf) return;
     const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(t.id)}"]`);
-    if (tileEl) tileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, t.user, 'voice'));
+    if (tileEl) tileEl.addEventListener('contextmenu', (e) => openAvatarContextMenu(e, t.user, 'voice'));
   });
 
   // Right-click the big stage = the focused share's own audio volume.
   const stageEl = dom.callViewBody.querySelector('.screenshare-stage');
   if (stageEl && focus && !focus.isSelf) {
-    stageEl.addEventListener('contextmenu', (e) => openVolumePopover(e, focus.user, 'share'));
+    stageEl.addEventListener('contextmenu', (e) => openAvatarContextMenu(e, focus.user, 'share'));
   }
 }
 
@@ -1277,7 +1409,7 @@ function renderCallView() {
       </div>`;
 
     const peerTileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(peer.id)}"]`);
-    if (peerTileEl) peerTileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, peer, 'voice'));
+    if (peerTileEl) peerTileEl.addEventListener('contextmenu', (e) => openAvatarContextMenu(e, peer, 'voice'));
   }
 
   const showControls = cm.state === 'calling' || cm.state === 'connected';
@@ -1342,7 +1474,7 @@ function renderGroupCallView() {
 
     participants.forEach((p) => {
       const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(p.user.id)}"]`);
-      if (tileEl) tileEl.addEventListener('contextmenu', (e) => openVolumePopover(e, p.user, 'voice'));
+      if (tileEl) tileEl.addEventListener('contextmenu', (e) => openAvatarContextMenu(e, p.user, 'voice'));
     });
   }
 
@@ -1502,9 +1634,10 @@ function openGroupSettingsModal(group) {
   dom.groupSettingsName.value = group.name;
   dom.groupSettingsMembers.innerHTML = group.members.map((m) => `
     <div class="group-member-row locked">
-      <div class="avatar avatar-sm" style="${avatarStyle(m)}">${avatarInner(m)}</div>
+      <div class="avatar avatar-sm" style="${avatarStyle(m)}" data-profile="${m.id}">${avatarInner(m)}</div>
       <span class="group-member-name">${escapeHtml(m.username)}<span class="group-member-tag">#${m.tag}</span></span>
     </div>`).join('');
+  wireProfileContextMenus(dom.groupSettingsMembers);
 
   const memberIds = new Set(group.members.map((m) => m.id));
   const addable = state.friends.filter((f) => !memberIds.has(f.id));

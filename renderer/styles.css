@@ -213,8 +213,16 @@ a { color: var(--accent); }
 /* ---------- Profile ---------- */
 .profile-card-wrap { width: 100%; max-width: 560px; }
 .profile-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; margin-top: 20px; }
-.profile-banner { height: 110px; background: linear-gradient(120deg, var(--accent), #4c3fc9); position: relative; overflow: hidden; }
+.profile-banner {
+  height: 110px; background: linear-gradient(120deg, var(--accent), #4c3fc9); position: relative; overflow: hidden;
+  display: flex; align-items: flex-end; justify-content: flex-end; padding: 10px;
+}
 .profile-banner::before { content:''; position: absolute; width: 180px; height: 180px; border-radius: 50%; background: rgba(255,255,255,0.08); top: -70px; right: -40px; }
+.banner-edit-badge {
+  position: relative; display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.55); border: none;
+  border-radius: 100px; padding: 6px 12px 6px 8px; color: #fff; font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;
+}
+.banner-edit-badge:hover { background: rgba(0,0,0,0.75); }
 .profile-body { padding: 0 24px 24px; }
 .profile-avatar-wrap { position: relative; width: 96px; height: 96px; margin-top: -48px; margin-bottom: 14px; }
 .avatar-edit-badge {
@@ -228,7 +236,12 @@ a { color: var(--accent); }
   font-size: 20px; font-weight: 800; padding: 2px 0; width: 100%; outline: none;
 }
 .profile-name-input:focus { border-bottom-color: var(--accent); }
-.profile-tag { font-size: 14px; color: var(--text-tertiary); margin-top: 2px; }
+.profile-tag-row { display: flex; align-items: center; gap: 2px; margin-top: 4px; color: var(--text-tertiary); font-size: 14px; font-weight: 600; }
+.profile-tag-input {
+  background: transparent; border: none; border-bottom: 1px solid transparent; color: var(--text-tertiary);
+  font-size: 14px; font-weight: 600; font-family: inherit; width: 46px; outline: none; padding: 1px 0;
+}
+.profile-tag-input:focus { border-bottom-color: var(--accent); color: var(--text-primary); }
 
 .status-options { display: flex; flex-direction: column; gap: 8px; }
 .status-option { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
@@ -453,20 +466,53 @@ a { color: var(--accent); }
 .group-member-row.checked .group-member-name, .group-member-row.locked .group-member-name { color: var(--text-primary); }
 .group-member-tag { color: var(--text-muted); font-weight: 600; }
 
-/* ---------- Per-user call volume popover ---------- */
-.volume-popover {
-  position: fixed; z-index: 90; width: 200px; background: var(--bg-panel); border: 1px solid var(--border-strong);
-  border-radius: 12px; padding: 14px 16px; box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+/* ---------- Avatar right-click context menu (profile + call volume) ---------- */
+.avatar-context-menu {
+  position: fixed; z-index: 90; width: 210px; background: var(--bg-panel); border: 1px solid var(--border-strong);
+  border-radius: 12px; padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,0.45);
 }
+.avatar-context-item {
+  display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text-primary);
+  font-family: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 10px; border-radius: 7px; cursor: pointer;
+}
+.avatar-context-item:hover { background: var(--bg-hover); }
+.avatar-context-divider { height: 1px; background: var(--border-strong); margin: 6px 2px; }
+.avatar-context-volume { padding: 4px 10px 8px; }
 .volume-popover-name { font-size: 12.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .volume-popover-row { display: flex; align-items: center; gap: 10px; }
-.volume-popover input[type="range"] {
+.volume-popover-row input[type="range"] {
   flex: 1; -webkit-appearance: none; height: 4px; border-radius: 2px; background: var(--border-strong); outline: none;
 }
-.volume-popover input[type="range"]::-webkit-slider-thumb {
+.volume-popover-row input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); cursor: pointer;
 }
 .volume-popover-value { font-size: 12px; color: var(--text-tertiary); font-weight: 600; width: 38px; text-align: right; flex-shrink: 0; }
+
+/* ---------- User profile viewer ---------- */
+.user-profile-card {
+  width: 340px; background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: 16px;
+  overflow: hidden; position: relative;
+}
+.modal-close-btn {
+  position: absolute; top: 10px; right: 10px; z-index: 2; width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(0,0,0,0.45); border: none; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.modal-close-btn:hover { background: rgba(0,0,0,0.7); }
+.user-profile-banner { height: 100px; background: linear-gradient(120deg, var(--accent), #4c3fc9); position: relative; overflow: hidden; }
+.user-profile-banner::before { content:''; position: absolute; width: 160px; height: 160px; border-radius: 50%; background: rgba(255,255,255,0.08); top: -60px; right: -30px; }
+.user-profile-body { padding: 0 20px 20px; }
+.user-profile-avatar-wrap { position: relative; width: 84px; height: 84px; margin-top: -42px; margin-bottom: 12px; }
+.user-profile-status-dot {
+  position: absolute; right: 0; bottom: 2px; width: 20px; height: 20px; border-radius: 50%; border: 4px solid var(--bg-panel);
+}
+.user-profile-name { font-size: 19px; font-weight: 800; }
+.user-profile-subline { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-tertiary); margin-top: 3px; }
+.user-profile-dot-sep { opacity: 0.6; }
+.user-profile-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.user-profile-section-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); margin-bottom: 6px; }
+.user-profile-bio { font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.user-profile-member-since { font-size: 13.5px; color: var(--text-secondary); }
+#user-profile-message-btn { margin-top: 18px; }
 
 /* ---------- Toast ---------- */
 .toast-container { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
