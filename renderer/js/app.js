@@ -6,6 +6,7 @@ import {
   escapeHtml, linkifyHtml, initials, avatarStyle, bannerStyle, statusLabel, statusDotClass,
   formatTime, formatDayTime, formatJoinDate, toast, el,
 } from './ui.js';
+import { EMOJI_CATEGORIES } from './emojiData.js';
 
 const MAX_GROUP_MEMBERS = 10;
 
@@ -80,6 +81,10 @@ const dom = {
   chatMessages: document.getElementById('chat-messages'),
   chatInput: document.getElementById('chat-input'),
   chatSendBtn: document.getElementById('chat-send-btn'),
+  emojiPickerBtn: document.getElementById('emoji-picker-btn'),
+  emojiPickerPanel: document.getElementById('emoji-picker-panel'),
+  emojiPickerTabs: document.getElementById('emoji-picker-tabs'),
+  emojiPickerGrid: document.getElementById('emoji-picker-grid'),
 
   callBar: document.getElementById('call-bar'),
   callBarTitle: document.getElementById('call-bar-title'),
@@ -447,6 +452,7 @@ function wireStaticHandlers() {
     dom.chatInput.style.height = `${Math.min(dom.chatInput.scrollHeight, 120)}px`;
   });
   dom.chatSendBtn.addEventListener('click', sendMessage);
+  wireEmojiPicker();
 
   // Conversas: start a group directly, without needing an active call
   dom.dmNewGroupBtn.addEventListener('click', () => openCreateGroupModal());
@@ -1152,6 +1158,60 @@ function renderGroupChatMessages() {
 
 // Links in chat must never navigate this window (see main.js's
 // will-navigate guard) — always hand them to the OS's default browser.
+function wireEmojiPicker() {
+  dom.emojiPickerTabs.innerHTML = EMOJI_CATEGORIES.map((cat, i) => `
+    <button type="button" class="emoji-picker-tab${i === 0 ? ' active' : ''}" data-cat="${i}" title="${escapeHtml(cat.label)}">${cat.icon}</button>
+  `).join('');
+
+  const renderCategory = (index) => {
+    dom.emojiPickerTabs.querySelectorAll('.emoji-picker-tab').forEach((btn, i) => {
+      btn.classList.toggle('active', i === index);
+    });
+    const cat = EMOJI_CATEGORIES[index];
+    dom.emojiPickerGrid.innerHTML = `
+      <div class="emoji-picker-category-label">${escapeHtml(cat.label)}</div>
+      ${cat.emojis.map((em) => `<button type="button" class="emoji-picker-item">${em}</button>`).join('')}
+    `;
+    dom.emojiPickerGrid.scrollTop = 0;
+  };
+
+  dom.emojiPickerTabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('.emoji-picker-tab');
+    if (!btn) return;
+    renderCategory(Number(btn.dataset.cat));
+  });
+
+  dom.emojiPickerGrid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.emoji-picker-item');
+    if (!btn) return;
+    insertAtCursor(dom.chatInput, btn.textContent);
+  });
+
+  dom.emojiPickerBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = dom.emojiPickerPanel.hidden;
+    dom.emojiPickerPanel.hidden = !willOpen;
+    if (willOpen) renderCategory(0);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (dom.emojiPickerPanel.hidden) return;
+    if (e.target === dom.emojiPickerBtn || dom.emojiPickerBtn.contains(e.target)) return;
+    if (dom.emojiPickerPanel.contains(e.target)) return;
+    dom.emojiPickerPanel.hidden = true;
+  });
+}
+
+function insertAtCursor(textarea, text) {
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+  const cursor = start + text.length;
+  textarea.focus();
+  textarea.setSelectionRange(cursor, cursor);
+  textarea.dispatchEvent(new Event('input'));
+}
+
 function wireMessageLinks() {
   dom.chatMessages.querySelectorAll('a[data-ext-link]').forEach((a) => {
     a.addEventListener('click', (e) => {

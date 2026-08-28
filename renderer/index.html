@@ -193,6 +193,15 @@
           <div class="chat-header" id="chat-header"></div>
           <div class="chat-messages" id="chat-messages"></div>
           <div class="chat-input-row">
+            <div class="emoji-picker-wrap">
+              <button id="emoji-picker-btn" class="icon-btn" type="button" title="Emojis">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.2 2 3.5 2 3.5-2 3.5-2"/><path d="M9 9.5h.01M15 9.5h.01"/></svg>
+              </button>
+              <div id="emoji-picker-panel" class="emoji-picker-panel" hidden>
+                <div id="emoji-picker-tabs" class="emoji-picker-tabs"></div>
+                <div id="emoji-picker-grid" class="emoji-picker-grid"></div>
+              </div>
+            </div>
             <textarea id="chat-input" class="chat-input" rows="1" placeholder="Mensagem"></textarea>
             <button id="chat-send-btn" class="send-btn">
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-6.5 16-2.7-6.8L4 12Z"/></svg>
