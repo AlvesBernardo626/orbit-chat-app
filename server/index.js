@@ -6,8 +6,8 @@ const { PORT, STATUSES } = require('../shared/constants');
 
 const VALID_STATUSES = STATUSES;
 
-function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
-  const db = createDb(dbFilePath);
+async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
+  const db = await createDb(mongoUri);
   const app = express();
   const httpServer = http.createServer(app);
   const io = new Server(httpServer, { cors: { origin: '*' } });
@@ -22,16 +22,16 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
     return user.status === 'invisible' ? 'offline' : user.status;
   }
 
-  function broadcastPresence(user) {
-    const friends = db.listFriends(user.id);
+  async function broadcastPresence(user) {
+    const friends = await db.listFriends(user.id);
     const status = effectiveStatus(user);
     friends.forEach((f) => {
       io.to(`user:${f.id}`).emit('presence:update', { userId: user.id, status });
     });
   }
 
-  function broadcastProfile(user) {
-    const friends = db.listFriends(user.id);
+  async function broadcastProfile(user) {
+    const friends = await db.listFriends(user.id);
     const payload = publicUser(user);
     friends.forEach((f) => {
       io.to(`user:${f.id}`).emit('friend:profile', payload);
@@ -78,14 +78,15 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
     return groupCallParticipants.has(groupId) ? [...groupCallParticipants.get(groupId)] : [];
   }
 
-  function publicGroup(group) {
+  async function publicGroup(group) {
     if (!group) return null;
+    const members = await Promise.all(group.members.map((id) => db.getUserById(id)));
     return {
       id: group.id,
       name: group.name,
       icon: group.icon,
       createdBy: group.createdBy,
-      members: group.members.map((id) => publicUser(db.getUserById(id))).filter(Boolean),
+      members: members.map(publicUser).filter(Boolean),
       activeCallMemberIds: activeCallMemberIds(group.id),
     };
   }
@@ -93,8 +94,8 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
   // Broadcast to EVERY group member (not just people currently on the call)
   // so the "who's on this call" facepile stays live even for someone just
   // looking at the group's chat header.
-  function broadcastGroupCallRoster(groupId) {
-    const group = db.getGroupById(groupId);
+  async function broadcastGroupCallRoster(groupId) {
+    const group = await db.getGroupById(groupId);
     if (!group) return;
     const participantIds = activeCallMemberIds(groupId);
     group.members.forEach((id) => {
@@ -109,60 +110,71 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
   io.on('connection', (socket) => {
     let currentUserId = null;
 
-    function joinSession(user) {
+    async function joinSession(user) {
       currentUserId = user.id;
       socket.join(`user:${user.id}`);
       if (!presence.has(user.id)) presence.set(user.id, new Set());
       presence.get(user.id).add(socket.id);
 
-      const friends = db.listFriends(user.id).map((f) => publicUser(f));
-      const incoming = db.listPendingIncoming(user.id).map((f) => publicUser(f));
-      const outgoing = db.listPendingOutgoing(user.id).map((f) => publicUser(f));
+      const [friendRows, incomingRows, outgoingRows] = await Promise.all([
+        db.listFriends(user.id),
+        db.listPendingIncoming(user.id),
+        db.listPendingOutgoing(user.id),
+      ]);
 
-      broadcastPresence(user);
+      await broadcastPresence(user);
 
       return {
         user: selfUser(user),
-        friends,
-        incoming,
-        outgoing,
+        friends: friendRows.map(publicUser),
+        incoming: incomingRows.map(publicUser),
+        outgoing: outgoingRows.map(publicUser),
       };
     }
 
-    socket.on('register', ({ username }, ack) => {
-      const trimmed = String(username || '').trim();
-      if (!trimmed) return ack && ack({ error: 'invalid_username' });
-      const user = db.createUser(trimmed);
-      ack && ack(joinSession(user));
+    socket.on('auth:register', async ({ username, password, confirmPassword }, ack) => {
+      if (password !== confirmPassword) return ack && ack({ error: 'password_mismatch' });
+      const result = await db.createAccount({ username, password });
+      if (result.error) return ack && ack({ error: result.error });
+      ack && ack(await joinSession(result.user));
     });
 
-    socket.on('auth', ({ id }, ack) => {
-      const user = db.getUserById(id);
+    socket.on('auth:login', async ({ username, password }, ack) => {
+      const result = await db.authenticate({ username, password });
+      if (result.error) return ack && ack({ error: result.error });
+      ack && ack(await joinSession(result.user));
+    });
+
+    // Silent relogin using the id saved locally after a previous successful
+    // login/register — lets the app skip the login screen until the user
+    // explicitly logs out, without storing the password on disk.
+    socket.on('auth:session', async ({ id }, ack) => {
+      const user = await db.getUserById(id);
       if (!user) return ack && ack({ error: 'not_found' });
-      ack && ack(joinSession(user));
+      ack && ack(await joinSession(user));
     });
 
-    socket.on('profile:update', (patch, ack) => {
+    socket.on('profile:update', async (patch, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const result = db.updateUserProfile(currentUserId, patch);
+      const result = await db.updateUserProfile(currentUserId, patch);
       if (result.error) return ack && ack({ error: result.error });
       ack && ack({ user: selfUser(result.user) });
       broadcastProfile(result.user);
     });
 
-    socket.on('status:update', ({ status }, ack) => {
+    socket.on('status:update', async ({ status }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
       if (!VALID_STATUSES.includes(status)) return ack && ack({ error: 'invalid_status' });
-      const user = db.updateUserStatus(currentUserId, status);
+      const user = await db.updateUserStatus(currentUserId, status);
       ack && ack({ user: selfUser(user) });
       broadcastPresence(user);
     });
 
-    socket.on('friend:request', ({ username, tag }, ack) => {
+    socket.on('friend:request', async ({ username, tag }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const result = db.createFriendRequest(currentUserId, String(username || ''), String(tag || ''));
+      const result = await db.createFriendRequest(currentUserId, String(username || ''), String(tag || ''));
       if (result.error) return ack && ack({ error: result.error });
-      const fromUser = db.getUserById(currentUserId);
+      const fromUser = await db.getUserById(currentUserId);
       // Both sides need friendshipId attached so their Accept/Decline/Cancel
       // buttons work immediately — db.getUserById() doesn't carry it (only
       // listPendingIncoming/Outgoing do), so it must be added by hand here.
@@ -170,9 +182,9 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       ack && ack({ ok: true, target: { ...publicUser(result.target), friendshipId: result.friendship.id } });
     });
 
-    socket.on('friend:respond', ({ friendshipId, accept }, ack) => {
+    socket.on('friend:respond', async ({ friendshipId, accept }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const result = db.respondFriendRequest(friendshipId, currentUserId, !!accept);
+      const result = await db.respondFriendRequest(friendshipId, currentUserId, !!accept);
       if (result.error) return ack && ack({ error: result.error });
       const { friendship } = result;
       const otherId = friendship
@@ -180,8 +192,7 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
         : null;
       ack && ack({ ok: true });
       if (otherId) {
-        const me = db.getUserById(currentUserId);
-        const other = db.getUserById(otherId);
+        const [me, other] = await Promise.all([db.getUserById(currentUserId), db.getUserById(otherId)]);
         io.to(`user:${currentUserId}`).emit('friend:updated', {});
         io.to(`user:${otherId}`).emit('friend:updated', {});
         if (accept) {
@@ -191,133 +202,138 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       }
     });
 
-    socket.on('friend:remove', ({ friendId }, ack) => {
+    socket.on('friend:remove', async ({ friendId }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      db.removeFriend(currentUserId, friendId);
+      await db.removeFriend(currentUserId, friendId);
       io.to(`user:${currentUserId}`).emit('friend:updated', {});
       io.to(`user:${friendId}`).emit('friend:updated', {});
       ack && ack({ ok: true });
     });
 
-    socket.on('friends:list', (_payload, ack) => {
+    socket.on('friends:list', async (_payload, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const friends = db.listFriends(currentUserId).map((f) => publicUser(f));
-      const incoming = db.listPendingIncoming(currentUserId).map((f) => publicUser(f));
-      const outgoing = db.listPendingOutgoing(currentUserId).map((f) => publicUser(f));
-      ack && ack({ friends, incoming, outgoing });
+      const [friends, incoming, outgoing] = await Promise.all([
+        db.listFriends(currentUserId),
+        db.listPendingIncoming(currentUserId),
+        db.listPendingOutgoing(currentUserId),
+      ]);
+      ack && ack({ friends: friends.map(publicUser), incoming: incoming.map(publicUser), outgoing: outgoing.map(publicUser) });
     });
 
-    socket.on('message:send', ({ to, text }, ack) => {
+    socket.on('message:send', async ({ to, text }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      if (!db.areFriends(currentUserId, to)) return ack && ack({ error: 'not_friends' });
+      if (!(await db.areFriends(currentUserId, to))) return ack && ack({ error: 'not_friends' });
       const trimmed = String(text || '').trim();
       if (!trimmed) return ack && ack({ error: 'empty' });
-      const message = db.addMessage(currentUserId, to, trimmed);
+      const message = await db.addMessage(currentUserId, to, trimmed);
       ack && ack({ ok: true, message });
       io.to(`user:${to}`).emit('message:receive', message);
     });
 
-    socket.on('messages:history', ({ withUserId }, ack) => {
+    socket.on('messages:history', async ({ withUserId }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const history = db.getConversation(currentUserId, withUserId);
+      const history = await db.getConversation(currentUserId, withUserId);
       ack && ack({ messages: history });
     });
 
     // --- Groups ---
-    socket.on('group:create', ({ name, memberIds }, ack) => {
+    socket.on('group:create', async ({ name, memberIds }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
       const others = Array.isArray(memberIds) ? memberIds : [];
       for (const id of others) {
-        if (!db.areFriends(currentUserId, id)) return ack && ack({ error: 'not_friends' });
+        if (!(await db.areFriends(currentUserId, id))) return ack && ack({ error: 'not_friends' });
       }
-      const result = db.createGroup(currentUserId, name, [currentUserId, ...others]);
+      const result = await db.createGroup(currentUserId, name, [currentUserId, ...others]);
       if (result.error) return ack && ack({ error: result.error });
-      const payload = publicGroup(result.group);
+      const payload = await publicGroup(result.group);
       result.group.members.forEach((id) => io.to(`user:${id}`).emit('group:created', payload));
       ack && ack({ ok: true, group: payload });
     });
 
-    socket.on('group:update', ({ groupId, name, icon }, ack) => {
+    socket.on('group:update', async ({ groupId, name, icon }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
-      const updated = db.updateGroup(groupId, { name, icon });
-      const payload = publicGroup(updated);
+      if (!(await db.isGroupMember(groupId, currentUserId))) return ack && ack({ error: 'not_member' });
+      const updated = await db.updateGroup(groupId, { name, icon });
+      const payload = await publicGroup(updated);
       updated.members.forEach((id) => io.to(`user:${id}`).emit('group:updated', payload));
       ack && ack({ ok: true, group: payload });
     });
 
-    socket.on('group:add-members', ({ groupId, memberIds }, ack) => {
+    socket.on('group:add-members', async ({ groupId, memberIds }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      if (!(await db.isGroupMember(groupId, currentUserId))) return ack && ack({ error: 'not_member' });
       const others = Array.isArray(memberIds) ? memberIds : [];
       for (const id of others) {
-        if (!db.areFriends(currentUserId, id)) return ack && ack({ error: 'not_friends' });
+        if (!(await db.areFriends(currentUserId, id))) return ack && ack({ error: 'not_friends' });
       }
-      const result = db.addGroupMembers(groupId, others);
+      const result = await db.addGroupMembers(groupId, others);
       if (result.error) return ack && ack({ error: result.error });
-      const payload = publicGroup(result.group);
+      const payload = await publicGroup(result.group);
       result.group.members.forEach((id) => io.to(`user:${id}`).emit('group:updated', payload));
       ack && ack({ ok: true, group: payload });
     });
 
-    socket.on('groups:list', (_payload, ack) => {
+    socket.on('groups:list', async (_payload, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const groups = db.listGroupsForUser(currentUserId).map(publicGroup);
-      ack && ack({ groups });
+      const groups = await db.listGroupsForUser(currentUserId);
+      const payloads = await Promise.all(groups.map(publicGroup));
+      ack && ack({ groups: payloads });
     });
 
-    socket.on('group:message:send', ({ groupId, text }, ack) => {
+    socket.on('group:message:send', async ({ groupId, text }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      if (!(await db.isGroupMember(groupId, currentUserId))) return ack && ack({ error: 'not_member' });
       const trimmed = String(text || '').trim();
       if (!trimmed) return ack && ack({ error: 'empty' });
-      const message = db.addGroupMessage(groupId, currentUserId, trimmed);
+      const message = await db.addGroupMessage(groupId, currentUserId, trimmed);
       ack && ack({ ok: true, message });
-      const group = db.getGroupById(groupId);
+      const group = await db.getGroupById(groupId);
       group.members.forEach((id) => {
         if (id !== currentUserId) io.to(`user:${id}`).emit('group:message:receive', message);
       });
     });
 
-    socket.on('group:messages:history', ({ groupId }, ack) => {
+    socket.on('group:messages:history', async ({ groupId }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
-      const history = db.getGroupConversation(groupId);
+      if (!(await db.isGroupMember(groupId, currentUserId))) return ack && ack({ error: 'not_member' });
+      const history = await db.getGroupConversation(groupId);
       ack && ack({ messages: history });
     });
 
     // --- Group call signaling (mesh: every participant connects to every other) ---
-    socket.on('call:group-start', ({ groupId }, ack) => {
+    socket.on('call:group-start', async ({ groupId }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const group = db.getGroupById(groupId);
+      const group = await db.getGroupById(groupId);
       if (!group || !group.members.includes(currentUserId)) return ack && ack({ error: 'not_member' });
       if (!groupCallParticipants.has(groupId)) groupCallParticipants.set(groupId, new Set());
       groupCallParticipants.get(groupId).add(currentUserId);
-      const caller = db.getUserById(currentUserId);
+      const caller = await db.getUserById(currentUserId);
+      const groupPayload = await publicGroup(group);
       onlineGroupMembers(group, currentUserId).forEach((id) => {
-        io.to(`user:${id}`).emit('call:group-incoming', { group: publicGroup(group), from: publicUser(caller) });
+        io.to(`user:${id}`).emit('call:group-incoming', { group: groupPayload, from: publicUser(caller) });
       });
       broadcastGroupCallRoster(groupId);
       ack && ack({ ok: true });
     });
 
-    socket.on('call:group-join', ({ groupId }, ack) => {
+    socket.on('call:group-join', async ({ groupId }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const group = db.getGroupById(groupId);
+      const group = await db.getGroupById(groupId);
       if (!group || !group.members.includes(currentUserId)) return ack && ack({ error: 'not_member' });
       if (!groupCallParticipants.has(groupId)) groupCallParticipants.set(groupId, new Set());
       const participants = groupCallParticipants.get(groupId);
       const existing = [...participants].filter((id) => id !== currentUserId);
       participants.add(currentUserId);
-      const joiner = db.getUserById(currentUserId);
+      const joiner = await db.getUserById(currentUserId);
       existing.forEach((id) => {
         io.to(`user:${id}`).emit('call:group-participant-joined', { groupId, user: publicUser(joiner) });
       });
       broadcastGroupCallRoster(groupId);
-      ack && ack({ ok: true, participants: existing.map((id) => publicUser(db.getUserById(id))) });
+      const existingUsers = await Promise.all(existing.map((id) => db.getUserById(id)));
+      ack && ack({ ok: true, participants: existingUsers.map(publicUser) });
     });
 
-    socket.on('call:group-leave', ({ groupId }, ack) => {
+    socket.on('call:group-leave', async ({ groupId }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
       const participants = groupCallParticipants.get(groupId);
       if (participants) {
@@ -331,10 +347,10 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
       ack && ack({ ok: true });
     });
 
-    const groupRelay = (event) => (payload, ack) => {
+    const groupRelay = (event) => async (payload, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
       const { groupId, to } = payload;
-      if (!db.isGroupMember(groupId, currentUserId)) return ack && ack({ error: 'not_member' });
+      if (!(await db.isGroupMember(groupId, currentUserId))) return ack && ack({ error: 'not_member' });
       io.to(`user:${to}`).emit(event, { ...payload, from: currentUserId });
       ack && ack({ ok: true });
     };
@@ -353,10 +369,10 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
     });
 
     // --- Call signaling (relay only) ---
-    const relay = (event) => (payload, ack) => {
+    const relay = (event) => async (payload, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
       const { to } = payload;
-      if (!db.areFriends(currentUserId, to)) return ack && ack({ error: 'not_friends' });
+      if (!(await db.areFriends(currentUserId, to))) return ack && ack({ error: 'not_friends' });
       io.to(`user:${to}`).emit(event, { ...payload, from: currentUserId });
       ack && ack({ ok: true });
     };
@@ -366,12 +382,12 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
     // (id/username/tag/avatar), not just a bare id like every other relayed
     // call:* event (whose payload the callee/caller already know how to map
     // back to the peer they started the call with).
-    socket.on('call:invite', ({ to }, ack) => {
+    socket.on('call:invite', async ({ to }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      if (!db.areFriends(currentUserId, to)) return ack && ack({ error: 'not_friends' });
+      if (!(await db.areFriends(currentUserId, to))) return ack && ack({ error: 'not_friends' });
       const targetOnline = presence.has(to) && presence.get(to).size > 0;
       if (!targetOnline) return ack && ack({ error: 'offline' });
-      const caller = db.getUserById(currentUserId);
+      const caller = await db.getUserById(currentUserId);
       io.to(`user:${to}`).emit('call:incoming', publicUser(caller));
       ack && ack({ ok: true });
     });
@@ -385,24 +401,24 @@ function startServer(dbFilePath, { port = PORT, host = '127.0.0.1' } = {}) {
     socket.on('call:end', relay('call:end'));
     socket.on('screenshare:state', relay('screenshare:state'));
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       if (!currentUserId) return;
       const set = presence.get(currentUserId);
       if (set) {
         set.delete(socket.id);
         if (set.size === 0) {
           presence.delete(currentUserId);
-          const user = db.getUserById(currentUserId);
+          const user = await db.getUserById(currentUserId);
           if (user) broadcastPresence(user);
-          groupCallParticipants.forEach((participants, groupId) => {
-            if (!participants.has(currentUserId)) return;
+          for (const [groupId, participants] of groupCallParticipants) {
+            if (!participants.has(currentUserId)) continue;
             participants.delete(currentUserId);
             participants.forEach((id) => {
               io.to(`user:${id}`).emit('call:group-participant-left', { groupId, userId: currentUserId });
             });
             if (participants.size === 0) groupCallParticipants.delete(groupId);
             broadcastGroupCallRoster(groupId);
-          });
+          }
         }
       }
     });

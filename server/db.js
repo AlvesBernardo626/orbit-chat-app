@@ -1,80 +1,133 @@
-const path = require('path');
 const crypto = require('crypto');
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
+const bcrypt = require('bcryptjs');
+const { MongoClient } = require('mongodb');
 
 const MAX_GROUP_MEMBERS = 10;
+const SALT_ROUNDS = 10;
+const NO_ID = { projection: { _id: 0 } };
 
-function createDb(dbFilePath) {
-  const adapter = new FileSync(dbFilePath);
-  const db = low(adapter);
-  db.defaults({ users: [], friendships: [], messages: [], groups: [] }).write();
+function pickColor(seed) {
+  const palettes = [
+    ['#22d3c9', '#0e7c86'],
+    ['#ff9d5c', '#c2410c'],
+    ['#f472b6', '#a3175e'],
+    ['#a78bfa', '#5b34c9'],
+    ['#fbbf24', '#b45309'],
+    ['#60a5fa', '#1d4ed8'],
+    ['#34d399', '#047857'],
+    ['#fb7185', '#9f1239'],
+  ];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return palettes[hash % palettes.length];
+}
 
-  function generateTag(username) {
-    const usernameLower = username.toLowerCase();
+// Users are persisted permanently in MongoDB Atlas (not the app's local
+// filesystem), so accounts survive redeploys of the signaling server and
+// restarts/sleeps of the Render instance — only an explicit profile edit
+// changes a stored record.
+async function createDb(mongoUri) {
+  if (!mongoUri) throw new Error('MONGODB_URI não configurada');
+  const client = new MongoClient(mongoUri);
+  await client.connect();
+  const db = client.db('orbit');
+
+  const users = db.collection('users');
+  const friendships = db.collection('friendships');
+  const messages = db.collection('messages');
+  const groups = db.collection('groups');
+
+  await Promise.all([
+    users.createIndex({ usernameLower: 1 }, { unique: true }),
+    users.createIndex({ id: 1 }, { unique: true }),
+    friendships.createIndex({ id: 1 }, { unique: true }),
+    friendships.createIndex({ userA: 1 }),
+    friendships.createIndex({ userB: 1 }),
+    messages.createIndex({ id: 1 }, { unique: true }),
+    messages.createIndex({ from: 1, to: 1 }),
+    messages.createIndex({ groupId: 1 }),
+    groups.createIndex({ id: 1 }, { unique: true }),
+    groups.createIndex({ members: 1 }),
+  ]);
+
+  async function generateTag(usernameLower) {
     let tag;
     let exists;
     do {
       tag = String(Math.floor(1 + Math.random() * 9999)).padStart(4, '0');
-      exists = db.get('users')
-        .find((u) => u.username.toLowerCase() === usernameLower && u.tag === tag)
-        .value();
+      exists = await users.findOne({ usernameLower, tag }, NO_ID);
     } while (exists);
     return tag;
   }
 
-  function createUser(username) {
-    const trimmed = username.trim().slice(0, 24);
-    const tag = generateTag(trimmed);
+  // --- Accounts (username + password) ---
+  function validatePassword(password) {
+    return typeof password === 'string' && password.length >= 6 && password.length <= 72;
+  }
+
+  async function createAccount({ username, password }) {
+    const trimmed = String(username || '').trim().slice(0, 24);
+    if (trimmed.length < 2) return { error: 'invalid_username' };
+    if (!validatePassword(password)) return { error: 'invalid_password' };
+
+    const usernameLower = trimmed.toLowerCase();
+    const existing = await users.findOne({ usernameLower }, NO_ID);
+    if (existing) return { error: 'username_taken' };
+
+    const tag = await generateTag(usernameLower);
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const user = {
       id: crypto.randomUUID(),
       username: trimmed,
+      usernameLower,
       tag,
+      passwordHash,
       avatar: { type: 'initials', color: pickColor(trimmed + tag) },
       banner: { type: 'gradient' },
       status: 'online',
       statusMessage: '',
       createdAt: Date.now(),
     };
-    db.get('users').push(user).write();
-    return user;
+    try {
+      await users.insertOne(user);
+    } catch (err) {
+      if (err && err.code === 11000) return { error: 'username_taken' };
+      throw err;
+    }
+    delete user._id;
+    return { user };
   }
 
-  function pickColor(seed) {
-    const palettes = [
-      ['#22d3c9', '#0e7c86'],
-      ['#ff9d5c', '#c2410c'],
-      ['#f472b6', '#a3175e'],
-      ['#a78bfa', '#5b34c9'],
-      ['#fbbf24', '#b45309'],
-      ['#60a5fa', '#1d4ed8'],
-      ['#34d399', '#047857'],
-      ['#fb7185', '#9f1239'],
-    ];
-    let hash = 0;
-    for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-    return palettes[hash % palettes.length];
+  async function authenticate({ username, password }) {
+    const usernameLower = String(username || '').trim().toLowerCase();
+    if (!usernameLower || !password) return { error: 'invalid_credentials' };
+    const user = await users.findOne({ usernameLower });
+    if (!user) return { error: 'invalid_credentials' };
+    const ok = await bcrypt.compare(String(password), user.passwordHash || '');
+    if (!ok) return { error: 'invalid_credentials' };
+    delete user._id;
+    return { user };
   }
 
-  function getUserById(id) {
-    return db.get('users').find({ id }).value();
+  async function getUserById(id) {
+    const user = await users.findOne({ id }, NO_ID);
+    return user || null;
   }
 
-  function getUserByUsernameTag(username, tag) {
-    const usernameLower = username.toLowerCase();
-    return db.get('users')
-      .find((u) => u.username.toLowerCase() === usernameLower && u.tag === tag)
-      .value();
+  async function getUserByUsernameTag(username, tag) {
+    const usernameLower = String(username || '').trim().toLowerCase();
+    const user = await users.findOne({ usernameLower, tag }, NO_ID);
+    return user || null;
   }
 
-  function updateUserProfile(id, { avatar, banner, statusMessage, username, tag }) {
-    const current = getUserById(id);
+  async function updateUserProfile(id, { avatar, banner, statusMessage, username, tag }) {
+    const current = await getUserById(id);
     if (!current) return { error: 'not_found' };
     const patch = {};
     if (avatar !== undefined) patch.avatar = avatar;
     if (banner !== undefined) patch.banner = banner;
     if (statusMessage !== undefined) patch.statusMessage = String(statusMessage).slice(0, 140);
-    if (username !== undefined) patch.username = username.trim().slice(0, 24);
+    if (username !== undefined) patch.username = String(username).trim().slice(0, 24);
 
     let paddedTag = current.tag;
     if (tag !== undefined) {
@@ -84,37 +137,38 @@ function createDb(dbFilePath) {
       patch.tag = paddedTag;
     }
 
-    // Re-check the (username, tag) pair whenever either half changes —
-    // changing just the username can just as easily collide with someone
-    // else who already holds that name under your current tag.
-    if (patch.username !== undefined || patch.tag !== undefined) {
-      const finalUsername = patch.username !== undefined ? patch.username : current.username;
-      const clash = db.get('users')
-        .find((u) => u.id !== id && u.username.toLowerCase() === finalUsername.toLowerCase() && u.tag === paddedTag)
-        .value();
-      if (clash) return { error: 'tag_taken' };
+    if (patch.username !== undefined) {
+      const finalUsernameLower = patch.username.toLowerCase();
+      if (finalUsernameLower !== current.usernameLower) {
+        const clash = await users.findOne({ id: { $ne: id }, usernameLower: finalUsernameLower }, NO_ID);
+        if (clash) return { error: 'username_taken' };
+      }
+      patch.usernameLower = finalUsernameLower;
     }
 
-    db.get('users').find({ id }).assign(patch).write();
-    return { user: getUserById(id) };
+    await users.updateOne({ id }, { $set: patch });
+    return { user: await getUserById(id) };
   }
 
-  function updateUserStatus(id, status) {
-    db.get('users').find({ id }).assign({ status }).write();
+  async function updateUserStatus(id, status) {
+    await users.updateOne({ id }, { $set: { status } });
     return getUserById(id);
   }
 
-  function friendshipBetween(userIdA, userIdB) {
-    return db.get('friendships')
-      .find((f) => (f.userA === userIdA && f.userB === userIdB) || (f.userA === userIdB && f.userB === userIdA))
-      .value();
+  async function friendshipBetween(userIdA, userIdB) {
+    return friendships.findOne({
+      $or: [
+        { userA: userIdA, userB: userIdB },
+        { userA: userIdB, userB: userIdA },
+      ],
+    }, NO_ID);
   }
 
-  function createFriendRequest(fromId, toUsername, toTag) {
-    const target = getUserByUsernameTag(toUsername, toTag);
+  async function createFriendRequest(fromId, toUsername, toTag) {
+    const target = await getUserByUsernameTag(toUsername, toTag);
     if (!target) return { error: 'not_found' };
     if (target.id === fromId) return { error: 'self' };
-    const existing = friendshipBetween(fromId, target.id);
+    const existing = await friendshipBetween(fromId, target.id);
     if (existing) {
       return { error: existing.status === 'accepted' ? 'already_friends' : 'already_pending' };
     }
@@ -126,68 +180,76 @@ function createDb(dbFilePath) {
       status: 'pending',
       createdAt: Date.now(),
     };
-    db.get('friendships').push(friendship).write();
+    await friendships.insertOne(friendship);
+    delete friendship._id;
     return { friendship, target };
   }
 
-  function respondFriendRequest(friendshipId, userId, accept) {
-    const friendship = db.get('friendships').find({ id: friendshipId }).value();
+  async function respondFriendRequest(friendshipId, userId, accept) {
+    const friendship = await friendships.findOne({ id: friendshipId }, NO_ID);
     if (!friendship) return { error: 'not_found' };
     if (friendship.userB !== userId && friendship.userA !== userId) return { error: 'forbidden' };
     if (friendship.requestedBy === userId) return { error: 'forbidden' };
     if (accept) {
-      db.get('friendships').find({ id: friendshipId }).assign({ status: 'accepted' }).write();
+      await friendships.updateOne({ id: friendshipId }, { $set: { status: 'accepted' } });
     } else {
-      db.get('friendships').remove({ id: friendshipId }).write();
+      await friendships.deleteOne({ id: friendshipId });
     }
-    return { friendship: db.get('friendships').find({ id: friendshipId }).value() };
+    return { friendship: await friendships.findOne({ id: friendshipId }, NO_ID) };
   }
 
-  function removeFriend(userId, friendId) {
-    db.get('friendships')
-      .remove((f) => (f.userA === userId && f.userB === friendId) || (f.userA === friendId && f.userB === userId))
-      .write();
+  async function removeFriend(userId, friendId) {
+    await friendships.deleteMany({
+      $or: [
+        { userA: userId, userB: friendId },
+        { userA: friendId, userB: userId },
+      ],
+    });
   }
 
-  function listFriends(userId) {
-    const friendships = db.get('friendships')
-      .filter((f) => f.status === 'accepted' && (f.userA === userId || f.userB === userId))
-      .value();
-    return friendships.map((f) => {
+  async function listFriends(userId) {
+    const rows = await friendships.find({
+      status: 'accepted',
+      $or: [{ userA: userId }, { userB: userId }],
+    }, NO_ID).toArray();
+    const others = await Promise.all(rows.map(async (f) => {
       const otherId = f.userA === userId ? f.userB : f.userA;
-      const other = getUserById(otherId);
+      const other = await getUserById(otherId);
       return other ? { ...other, friendshipId: f.id } : null;
-    }).filter(Boolean);
+    }));
+    return others.filter(Boolean);
   }
 
-  function listPendingIncoming(userId) {
-    const friendships = db.get('friendships')
-      .filter((f) => f.status === 'pending' && f.requestedBy !== userId && (f.userA === userId || f.userB === userId))
-      .value();
-    return friendships.map((f) => {
+  async function listPendingIncoming(userId) {
+    const rows = await friendships.find({
+      status: 'pending',
+      requestedBy: { $ne: userId },
+      $or: [{ userA: userId }, { userB: userId }],
+    }, NO_ID).toArray();
+    const others = await Promise.all(rows.map(async (f) => {
       const otherId = f.userA === userId ? f.userB : f.userA;
-      const other = getUserById(otherId);
+      const other = await getUserById(otherId);
       return other ? { ...other, friendshipId: f.id } : null;
-    }).filter(Boolean);
+    }));
+    return others.filter(Boolean);
   }
 
-  function listPendingOutgoing(userId) {
-    const friendships = db.get('friendships')
-      .filter((f) => f.status === 'pending' && f.requestedBy === userId)
-      .value();
-    return friendships.map((f) => {
+  async function listPendingOutgoing(userId) {
+    const rows = await friendships.find({ status: 'pending', requestedBy: userId }, NO_ID).toArray();
+    const others = await Promise.all(rows.map(async (f) => {
       const otherId = f.userA === userId ? f.userB : f.userA;
-      const other = getUserById(otherId);
+      const other = await getUserById(otherId);
       return other ? { ...other, friendshipId: f.id } : null;
-    }).filter(Boolean);
+    }));
+    return others.filter(Boolean);
   }
 
-  function areFriends(userIdA, userIdB) {
-    const f = friendshipBetween(userIdA, userIdB);
+  async function areFriends(userIdA, userIdB) {
+    const f = await friendshipBetween(userIdA, userIdB);
     return !!(f && f.status === 'accepted');
   }
 
-  function addMessage(fromId, toId, text) {
+  async function addMessage(fromId, toId, text) {
     const message = {
       id: crypto.randomUUID(),
       from: fromId,
@@ -195,23 +257,27 @@ function createDb(dbFilePath) {
       text: String(text).slice(0, 4000),
       createdAt: Date.now(),
     };
-    db.get('messages').push(message).write();
+    await messages.insertOne(message);
+    delete message._id;
     return message;
   }
 
-  function getConversation(userIdA, userIdB, limit = 200) {
-    const all = db.get('messages')
-      .filter((m) => (m.from === userIdA && m.to === userIdB) || (m.from === userIdB && m.to === userIdA))
-      .value();
+  async function getConversation(userIdA, userIdB, limit = 200) {
+    const all = await messages.find({
+      $or: [
+        { from: userIdA, to: userIdB },
+        { from: userIdB, to: userIdA },
+      ],
+    }, NO_ID).sort({ createdAt: 1 }).toArray();
     return all.slice(-limit);
   }
 
-  function lastMessageWith(userIdA, userIdB) {
-    const conv = getConversation(userIdA, userIdB, 1);
+  async function lastMessageWith(userIdA, userIdB) {
+    const conv = await getConversation(userIdA, userIdB, 1);
     return conv[conv.length - 1] || null;
   }
 
-  function createGroup(creatorId, name, memberIds) {
+  async function createGroup(creatorId, name, memberIds) {
     const uniqueMembers = [...new Set(memberIds)];
     if (uniqueMembers.length < 2) return { error: 'need_more_members' };
     if (uniqueMembers.length > MAX_GROUP_MEMBERS) return { error: 'too_many_members' };
@@ -224,41 +290,42 @@ function createDb(dbFilePath) {
       createdBy: creatorId,
       createdAt: Date.now(),
     };
-    db.get('groups').push(group).write();
+    await groups.insertOne(group);
+    delete group._id;
     return { group };
   }
 
-  function getGroupById(id) {
-    return db.get('groups').find({ id }).value();
+  async function getGroupById(id) {
+    return groups.findOne({ id }, NO_ID);
   }
 
-  function isGroupMember(groupId, userId) {
-    const group = getGroupById(groupId);
+  async function isGroupMember(groupId, userId) {
+    const group = await getGroupById(groupId);
     return !!(group && group.members.includes(userId));
   }
 
-  function updateGroup(id, { name, icon }) {
+  async function updateGroup(id, { name, icon }) {
     const patch = {};
     if (name !== undefined) patch.name = name.trim().slice(0, 40) || 'Novo grupo';
     if (icon !== undefined) patch.icon = icon;
-    db.get('groups').find({ id }).assign(patch).write();
+    await groups.updateOne({ id }, { $set: patch });
     return getGroupById(id);
   }
 
-  function addGroupMembers(groupId, newMemberIds) {
-    const group = getGroupById(groupId);
+  async function addGroupMembers(groupId, newMemberIds) {
+    const group = await getGroupById(groupId);
     if (!group) return { error: 'not_found' };
     const merged = [...new Set([...group.members, ...newMemberIds])];
     if (merged.length > MAX_GROUP_MEMBERS) return { error: 'too_many_members' };
-    db.get('groups').find({ id: groupId }).assign({ members: merged }).write();
-    return { group: getGroupById(groupId) };
+    await groups.updateOne({ id: groupId }, { $set: { members: merged } });
+    return { group: await getGroupById(groupId) };
   }
 
-  function listGroupsForUser(userId) {
-    return db.get('groups').filter((g) => g.members.includes(userId)).value();
+  async function listGroupsForUser(userId) {
+    return groups.find({ members: userId }, NO_ID).toArray();
   }
 
-  function addGroupMessage(groupId, fromId, text) {
+  async function addGroupMessage(groupId, fromId, text) {
     const message = {
       id: crypto.randomUUID(),
       groupId,
@@ -266,17 +333,19 @@ function createDb(dbFilePath) {
       text: String(text).slice(0, 4000),
       createdAt: Date.now(),
     };
-    db.get('messages').push(message).write();
+    await messages.insertOne(message);
+    delete message._id;
     return message;
   }
 
-  function getGroupConversation(groupId, limit = 200) {
-    const all = db.get('messages').filter((m) => m.groupId === groupId).value();
+  async function getGroupConversation(groupId, limit = 200) {
+    const all = await messages.find({ groupId }, NO_ID).sort({ createdAt: 1 }).toArray();
     return all.slice(-limit);
   }
 
   return {
-    createUser,
+    createAccount,
+    authenticate,
     getUserById,
     getUserByUsernameTag,
     updateUserProfile,

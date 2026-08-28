@@ -9,25 +9,48 @@
 </head>
 <body>
 
-  <!-- Onboarding -->
+  <!-- Onboarding: create account or log in -->
   <div id="onboarding-screen" class="onboarding">
     <div class="onboarding-card">
       <div class="brand">
         <div class="brand-mark"></div>
         <span>Orbit</span>
       </div>
-      <h1>Crie seu perfil</h1>
-      <p class="onboarding-sub">Escolha um nome. Vamos gerar uma tag numérica única para você — é assim que seus amigos vão te adicionar.</p>
 
-      <label class="field-label" for="onboarding-name">Como podemos te chamar?</label>
-      <input id="onboarding-name" class="text-input" type="text" maxlength="24" placeholder="Ex: Aline Ferraz" autocomplete="off">
+      <div id="auth-register-view">
+        <h1>Crie sua conta</h1>
+        <p class="onboarding-sub">Escolha um nome de usuário único e uma senha. Vamos gerar uma tag numérica para você — é assim que seus amigos vão te adicionar.</p>
 
-      <div class="onboarding-preview">
-        Você será encontrado como <strong id="onboarding-preview-name">seunome</strong><span id="onboarding-preview-tag">#####</span>
+        <label class="field-label" for="register-username">Nome de usuário</label>
+        <input id="register-username" class="text-input" type="text" maxlength="24" placeholder="Ex: alineferraz" autocomplete="username" style="margin-bottom:14px;">
+
+        <label class="field-label" for="register-password">Senha</label>
+        <input id="register-password" class="text-input" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" style="margin-bottom:14px;">
+
+        <label class="field-label" for="register-password-confirm">Confirmar senha</label>
+        <input id="register-password-confirm" class="text-input" type="password" placeholder="Digite a senha novamente" autocomplete="new-password">
+
+        <button id="register-submit" class="btn btn-primary btn-block" style="margin-top:20px;" disabled>Criar conta</button>
+        <div id="register-error" class="onboarding-error" hidden></div>
+
+        <div class="auth-switch">Já tem uma conta? <button id="show-login-btn" class="auth-switch-link" type="button">Entrar</button></div>
       </div>
 
-      <button id="onboarding-submit" class="btn btn-primary btn-block" disabled>Continuar</button>
-      <div id="onboarding-error" class="onboarding-error" hidden></div>
+      <div id="auth-login-view" hidden>
+        <h1>Bem-vindo de volta</h1>
+        <p class="onboarding-sub">Entre com seu nome de usuário e senha.</p>
+
+        <label class="field-label" for="login-username">Nome de usuário</label>
+        <input id="login-username" class="text-input" type="text" maxlength="24" placeholder="usuario" autocomplete="username" style="margin-bottom:14px;">
+
+        <label class="field-label" for="login-password">Senha</label>
+        <input id="login-password" class="text-input" type="password" placeholder="Sua senha" autocomplete="current-password">
+
+        <button id="login-submit" class="btn btn-primary btn-block" style="margin-top:20px;" disabled>Entrar</button>
+        <div id="login-error" class="onboarding-error" hidden></div>
+
+        <div class="auth-switch">Não tem uma conta? <button id="show-register-btn" class="auth-switch-link" type="button">Criar conta</button></div>
+      </div>
     </div>
   </div>
 
@@ -45,6 +68,9 @@
       <button class="nav-btn" data-tab="chat" title="Conversas">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5v8c0 1.4-1.1 2.5-2.5 2.5H10l-4.5 4v-4H6.5C5.1 17 4 15.9 4 14.5v-8Z"/></svg>
         <span id="chat-unread-dot" class="unread-dot" hidden></span>
+      </button>
+      <button id="logout-btn" class="nav-btn nav-btn-logout" title="Sair da conta">
+        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20H9"/><path d="M16 16l4-4-4-4"/><path d="M20 12H9"/></svg>
       </button>
     </nav>
 

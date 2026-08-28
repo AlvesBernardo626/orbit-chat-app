@@ -1,4 +1,4 @@
-import { emit, on } from './api.js';
+import { emit, on, socket } from './api.js';
 import { callManager } from './call.js';
 import { groupCallManager } from './groupCall.js';
 import { getStoredVolume, setStoredVolume, getStoredShareVolume, setStoredShareVolume } from './volume.js';
@@ -38,10 +38,20 @@ const state = {
 
 const dom = {
   onboarding: document.getElementById('onboarding-screen'),
-  onboardingName: document.getElementById('onboarding-name'),
-  onboardingSubmit: document.getElementById('onboarding-submit'),
-  onboardingPreviewName: document.getElementById('onboarding-preview-name'),
-  onboardingError: document.getElementById('onboarding-error'),
+  authRegisterView: document.getElementById('auth-register-view'),
+  authLoginView: document.getElementById('auth-login-view'),
+  registerUsername: document.getElementById('register-username'),
+  registerPassword: document.getElementById('register-password'),
+  registerPasswordConfirm: document.getElementById('register-password-confirm'),
+  registerSubmit: document.getElementById('register-submit'),
+  registerError: document.getElementById('register-error'),
+  showLoginBtn: document.getElementById('show-login-btn'),
+  loginUsername: document.getElementById('login-username'),
+  loginPassword: document.getElementById('login-password'),
+  loginSubmit: document.getElementById('login-submit'),
+  loginError: document.getElementById('login-error'),
+  showRegisterBtn: document.getElementById('show-register-btn'),
+  logoutBtn: document.getElementById('logout-btn'),
 
   mainApp: document.getElementById('main-app'),
   navIndicator: document.getElementById('nav-indicator'),
@@ -177,7 +187,7 @@ window.orbit.screenShare.onPickRequest((sources) => showScreenSharePicker(source
 boot();
 
 async function boot() {
-  wireOnboarding();
+  wireAuth();
   wireStaticHandlers();
   callManager.onUpdate(onCallUpdate);
   groupCallManager.onUpdate(onGroupCallUpdate);
@@ -187,7 +197,7 @@ async function boot() {
   const saved = await window.orbit.session.load();
   if (saved && saved.id) {
     try {
-      const res = await emit('auth', { id: saved.id });
+      const res = await emit('auth:session', { id: saved.id });
       onLoggedIn(res);
       return;
     } catch {
@@ -195,36 +205,141 @@ async function boot() {
     }
   }
   dom.onboarding.hidden = false;
-  dom.onboardingName.focus();
+  showAuthView('register');
 }
 
-// ---------------- Onboarding ----------------
-function wireOnboarding() {
-  dom.onboardingName.addEventListener('input', () => {
-    const value = dom.onboardingName.value.trim();
-    dom.onboardingPreviewName.textContent = value || 'seunome';
-    dom.onboardingSubmit.disabled = value.length === 0;
-  });
-  dom.onboardingName.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !dom.onboardingSubmit.disabled) submitOnboarding();
-  });
-  dom.onboardingSubmit.addEventListener('click', submitOnboarding);
+// ---------------- Auth (create account / log in) ----------------
+function showAuthView(view) {
+  dom.authRegisterView.hidden = view !== 'register';
+  dom.authLoginView.hidden = view !== 'login';
+  dom.registerError.hidden = true;
+  dom.loginError.hidden = true;
+  if (view === 'register') {
+    dom.registerUsername.value = '';
+    dom.registerPassword.value = '';
+    dom.registerPasswordConfirm.value = '';
+    dom.registerSubmit.disabled = true;
+    dom.registerUsername.focus();
+  } else {
+    dom.loginUsername.value = '';
+    dom.loginPassword.value = '';
+    dom.loginSubmit.disabled = true;
+    dom.loginUsername.focus();
+  }
 }
 
-async function submitOnboarding() {
-  const username = dom.onboardingName.value.trim();
-  if (!username) return;
-  dom.onboardingSubmit.disabled = true;
-  dom.onboardingError.hidden = true;
+function wireAuth() {
+  const updateRegisterDisabled = () => {
+    dom.registerSubmit.disabled = !(
+      dom.registerUsername.value.trim().length >= 2
+      && dom.registerPassword.value.length >= 6
+      && dom.registerPasswordConfirm.value.length >= 6
+    );
+  };
+  [dom.registerUsername, dom.registerPassword, dom.registerPasswordConfirm].forEach((input) => {
+    input.addEventListener('input', updateRegisterDisabled);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !dom.registerSubmit.disabled) submitRegister();
+    });
+  });
+  dom.registerSubmit.addEventListener('click', submitRegister);
+  dom.showLoginBtn.addEventListener('click', () => showAuthView('login'));
+
+  const updateLoginDisabled = () => {
+    dom.loginSubmit.disabled = !(dom.loginUsername.value.trim().length > 0 && dom.loginPassword.value.length > 0);
+  };
+  [dom.loginUsername, dom.loginPassword].forEach((input) => {
+    input.addEventListener('input', updateLoginDisabled);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !dom.loginSubmit.disabled) submitLogin();
+    });
+  });
+  dom.loginSubmit.addEventListener('click', submitLogin);
+  dom.showRegisterBtn.addEventListener('click', () => showAuthView('register'));
+
+  dom.logoutBtn.addEventListener('click', logout);
+}
+
+async function submitRegister() {
+  const username = dom.registerUsername.value.trim();
+  const password = dom.registerPassword.value;
+  const confirmPassword = dom.registerPasswordConfirm.value;
+  if (!username || password.length < 6) return;
+  if (password !== confirmPassword) {
+    dom.registerError.textContent = 'As senhas digitadas não são iguais.';
+    dom.registerError.hidden = false;
+    return;
+  }
+  dom.registerSubmit.disabled = true;
+  dom.registerError.hidden = true;
   try {
-    const res = await emit('register', { username });
+    const res = await emit('auth:register', { username, password, confirmPassword });
     await window.orbit.session.save({ id: res.user.id });
     onLoggedIn(res);
   } catch (err) {
-    dom.onboardingError.textContent = 'Não foi possível criar seu perfil. Tente novamente.';
-    dom.onboardingError.hidden = false;
-    dom.onboardingSubmit.disabled = false;
+    const messages = {
+      invalid_username: 'Escolha um nome de usuário com pelo menos 2 caracteres.',
+      invalid_password: 'A senha deve ter pelo menos 6 caracteres.',
+      password_mismatch: 'As senhas digitadas não são iguais.',
+      username_taken: 'Esse nome de usuário já está em uso. Escolha outro.',
+    };
+    dom.registerError.textContent = messages[err.message] || 'Não foi possível criar sua conta. Tente novamente.';
+    dom.registerError.hidden = false;
+    dom.registerSubmit.disabled = false;
   }
+}
+
+async function submitLogin() {
+  const username = dom.loginUsername.value.trim();
+  const password = dom.loginPassword.value;
+  if (!username || !password) return;
+  dom.loginSubmit.disabled = true;
+  dom.loginError.hidden = true;
+  try {
+    const res = await emit('auth:login', { username, password });
+    await window.orbit.session.save({ id: res.user.id });
+    onLoggedIn(res);
+  } catch (err) {
+    dom.loginError.textContent = err.message === 'invalid_credentials'
+      ? 'Usuário ou senha incorretos.'
+      : 'Não foi possível entrar. Tente novamente.';
+    dom.loginError.hidden = false;
+    dom.loginSubmit.disabled = false;
+  }
+}
+
+async function logout() {
+  callManager.endCall();
+  groupCallManager.leaveCall();
+  await window.orbit.session.clear();
+  socket.disconnect();
+  socket.connect();
+
+  Object.assign(state, {
+    currentUser: null,
+    friends: [],
+    incoming: [],
+    outgoing: [],
+    groups: [],
+    activeTab: 'friends',
+    selectedType: null,
+    selectedPeerId: null,
+    selectedGroupId: null,
+    conversations: {},
+    groupConversations: {},
+    callViewExpanded: true,
+    pendingAutoShare: null,
+    pendingGroupContext: null,
+    editingGroupId: null,
+    volumePopoverTarget: null,
+    volumePopoverMode: 'voice',
+    focusedShareId: null,
+    contextMenuUser: null,
+  });
+
+  dom.mainApp.hidden = true;
+  dom.onboarding.hidden = false;
+  showAuthView('login');
 }
 
 // ---------------- Login ----------------
@@ -250,7 +365,13 @@ async function onLoggedIn(res) {
   } catch { /* ignore */ }
 }
 
+let realtimeBound = false;
 function bindRealtimeEvents() {
+  // The socket is reused (disconnect+reconnect) across a logout/login cycle
+  // within the same app session, so these listeners must only ever be wired
+  // once — they read live `state.*` on every call, not a stale snapshot.
+  if (realtimeBound) return;
+  realtimeBound = true;
   on('presence:update', ({ userId, status }) => {
     const friend = state.friends.find((f) => f.id === userId);
     if (friend) friend.status = status;
@@ -434,7 +555,7 @@ function wireStaticHandlers() {
     } catch (err) {
       const messages = {
         invalid_tag: 'A tag deve ter de 1 a 4 números.',
-        tag_taken: 'Essa tag já está em uso por outra pessoa com esse mesmo nome.',
+        username_taken: 'Esse nome de usuário já está em uso por outra pessoa.',
       };
       toast(messages[err.message] || 'Não foi possível salvar o perfil', 'err');
     }

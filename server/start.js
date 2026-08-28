@@ -1,14 +1,19 @@
 const { startServer } = require('./index');
-const { DB_FILE } = require('./paths');
+const { MONGODB_URI } = require('./paths');
 const { PORT } = require('../shared/constants');
 
 const port = process.env.PORT ? Number(process.env.PORT) : PORT;
 const host = process.env.HOST || '0.0.0.0';
 
-startServer(DB_FILE, { port, host })
+if (!MONGODB_URI) {
+  console.error('MONGODB_URI não configurada. Defina essa variável de ambiente antes de iniciar o servidor.');
+  process.exit(1);
+}
+
+startServer(MONGODB_URI, { port, host })
   .then(() => {
     console.log(`Servidor Orbit rodando em http://${host}:${port}`);
-    console.log(`Banco de dados: ${DB_FILE}`);
+    console.log('Banco de dados: MongoDB Atlas');
   })
   .catch((err) => {
     if (err.code === 'EADDRINUSE') {

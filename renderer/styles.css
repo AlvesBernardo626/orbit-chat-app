@@ -68,6 +68,12 @@ a { color: var(--accent); }
 .onboarding-preview strong { color: var(--text-primary); font-weight: 700; }
 #onboarding-preview-tag { color: var(--accent); font-weight: 700; }
 .onboarding-error { margin-top: 12px; font-size: 13px; color: var(--red); }
+.auth-switch { margin-top: 18px; font-size: 13px; color: var(--text-tertiary); text-align: center; }
+.auth-switch-link {
+  background: none; border: none; color: var(--accent); font-weight: 700; font-size: 13px;
+  font-family: inherit; cursor: pointer; padding: 0; margin-left: 4px;
+}
+.auth-switch-link:hover { text-decoration: underline; }
 
 /* ---------- Inputs / buttons ---------- */
 .text-input {
@@ -145,6 +151,8 @@ a { color: var(--accent); }
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--red); border: 2px solid var(--bg-rail);
 }
+.nav-btn-logout { margin-top: auto; color: var(--red); }
+.nav-btn-logout:hover { background: rgba(229, 72, 77, 0.15); color: var(--red); }
 
 .tab-panel { flex: 1; min-width: 0; display: flex; overflow: hidden; }
 .panel-content { flex: 1; min-width: 0; padding: 28px 32px; overflow-y: auto; }

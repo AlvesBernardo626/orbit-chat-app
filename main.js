@@ -15,7 +15,7 @@ const baseUserData = app.getPath('userData');
 app.setPath('userData', path.join(baseUserData, `profile-${profile}`));
 
 const { startServer } = require('./server/index');
-const { DB_FILE } = require('./server/paths');
+const { MONGODB_URI } = require('./server/paths');
 const { PORT, IS_REMOTE_SERVER, SERVER_URL } = require('./shared/constants');
 
 let mainWindow = null;
@@ -29,7 +29,7 @@ async function ensureServer() {
     return;
   }
   try {
-    await startServer(DB_FILE);
+    await startServer(MONGODB_URI);
     console.log(`[orbit] servidor de sinalização iniciado nesta instância (porta ${PORT})`);
   } catch (err) {
     if (err && err.code === 'EADDRINUSE') {

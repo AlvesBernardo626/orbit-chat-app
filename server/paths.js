@@ -1,8 +1,6 @@
-const path = require('path');
-const fs = require('fs');
+// Users, friendships, messages and groups now live permanently in MongoDB
+// Atlas (see atlas-credentials.env, not committed) instead of a local JSON
+// file, so a Render redeploy/restart never wipes accounts anymore.
+const MONGODB_URI = process.env.MONGODB_URI || '';
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-
-module.exports = { DATA_DIR, DB_FILE };
+module.exports = { MONGODB_URI };
