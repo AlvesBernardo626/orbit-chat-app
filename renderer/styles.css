@@ -284,6 +284,16 @@ a { color: var(--accent); }
 }
 .profile-color-preview-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 .profile-color-swatch { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border-strong); flex-shrink: 0; }
+.profile-color-hex-row {
+  display: flex; align-items: center; gap: 6px; background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 9px 12px;
+}
+.profile-color-hex-prefix { color: var(--text-muted); font-weight: 700; font-size: 14px; }
+.profile-color-hex-input {
+  background: none; border: none; outline: none; color: var(--text-primary); font-size: 14px; font-family: inherit;
+  width: 100%; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.profile-color-hex-input::placeholder { color: var(--text-muted); text-transform: none; letter-spacing: normal; }
 
 .profile-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 22px; }
 .profile-save-hint { font-size: 12.5px; color: var(--green); opacity: 0; transition: opacity 0.2s; }

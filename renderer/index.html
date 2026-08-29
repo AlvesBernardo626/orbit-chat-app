@@ -176,6 +176,13 @@
                 <div class="profile-color-controls">
                   <label class="field-label" for="profile-color-brightness" style="margin-bottom:8px;">Brilho</label>
                   <input id="profile-color-brightness" type="range" min="20" max="100" value="100" class="color-brightness-slider">
+
+                  <label class="field-label" for="profile-color-hex" style="margin-top:16px; margin-bottom:8px;">Código hexadecimal</label>
+                  <div class="profile-color-hex-row">
+                    <span class="profile-color-hex-prefix">#</span>
+                    <input id="profile-color-hex" class="profile-color-hex-input" type="text" maxlength="6" placeholder="7b6ef6" autocomplete="off" spellcheck="false">
+                  </div>
+
                   <div class="profile-color-preview-row">
                     <div id="profile-color-swatch" class="profile-color-swatch"></div>
                     <button id="profile-color-reset" class="btn btn-ghost" type="button">Restaurar padrão</button>

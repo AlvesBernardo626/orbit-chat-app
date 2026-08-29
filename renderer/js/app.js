@@ -84,6 +84,7 @@ const dom = {
   profileBioInput: document.getElementById('profile-bio-input'),
   profileColorWheel: document.getElementById('profile-color-wheel'),
   profileColorBrightness: document.getElementById('profile-color-brightness'),
+  profileColorHex: document.getElementById('profile-color-hex'),
   profileColorSwatch: document.getElementById('profile-color-swatch'),
   profileColorReset: document.getElementById('profile-color-reset'),
   profileCard: document.querySelector('#tab-profile .profile-card'),
@@ -543,23 +544,44 @@ function wireStaticHandlers() {
 
   profileColorWheel = new ColorWheel(dom.profileColorWheel, {
     onChange: (hex, committed) => {
-      dom.profileColorSwatch.style.backgroundColor = hex;
-      dom.profileCard.style.backgroundColor = hex;
+      syncColorPreview(hex);
       if (committed) saveProfileColor(hex);
     },
   });
   dom.profileColorBrightness.addEventListener('input', () => {
     profileColorWheel.setValue(Number(dom.profileColorBrightness.value));
-    const hex = profileColorWheel.hex();
-    dom.profileColorSwatch.style.backgroundColor = hex;
-    dom.profileCard.style.backgroundColor = hex;
+    syncColorPreview(profileColorWheel.hex());
   });
   dom.profileColorBrightness.addEventListener('change', () => {
     saveProfileColor(profileColorWheel.hex());
   });
   dom.profileColorReset.addEventListener('click', () => {
+    // The card goes back to the real theme default (no inline override) —
+    // the wheel/swatch/hex box just reset to a neutral starting point for
+    // the next time someone wants to pick a custom color.
+    profileColorWheel.setFromHex(DEFAULT_WHEEL_HEX);
+    dom.profileColorBrightness.value = String(Math.round(profileColorWheel.value));
+    dom.profileColorSwatch.style.backgroundColor = profileColorWheel.hex();
+    dom.profileColorHex.value = profileColorWheel.hex().replace('#', '').toUpperCase();
     dom.profileCard.style.backgroundColor = '';
     saveProfileColor(null);
+  });
+
+  dom.profileColorHex.addEventListener('input', () => {
+    const hex = `#${dom.profileColorHex.value.trim()}`;
+    if (!/^#[0-9a-f]{6}$/i.test(hex)) return;
+    profileColorWheel.setFromHex(hex);
+    dom.profileColorBrightness.value = String(Math.round(profileColorWheel.value));
+    syncColorPreview(hex, false);
+  });
+  const commitHexInput = () => {
+    const hex = `#${dom.profileColorHex.value.trim()}`;
+    if (/^#[0-9a-f]{6}$/i.test(hex)) saveProfileColor(hex.toLowerCase());
+    else syncColorPreview(profileColorWheel.hex());
+  };
+  dom.profileColorHex.addEventListener('change', commitHexInput);
+  dom.profileColorHex.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') dom.profileColorHex.blur();
   });
 
   dom.statusOptions.querySelectorAll('.status-option').forEach((opt) => {
@@ -973,8 +995,14 @@ function renderProfile() {
   if (profileColorWheel) {
     profileColorWheel.setFromHex(u.profileColor || DEFAULT_WHEEL_HEX);
     dom.profileColorBrightness.value = String(Math.round(profileColorWheel.value));
-    dom.profileColorSwatch.style.backgroundColor = profileColorWheel.hex();
+    syncColorPreview(profileColorWheel.hex());
   }
+}
+
+function syncColorPreview(hex, updateHexInput = true) {
+  dom.profileColorSwatch.style.backgroundColor = hex;
+  dom.profileCard.style.backgroundColor = hex;
+  if (updateHexInput) dom.profileColorHex.value = hex.replace('#', '').toUpperCase();
 }
 
 async function saveProfileColor(color) {
