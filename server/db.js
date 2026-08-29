@@ -281,6 +281,18 @@ async function createDb(mongoUri) {
     return conv[conv.length - 1] || null;
   }
 
+  // Shared by DM and group messages — both live in the same collection,
+  // distinguished only by having `to` vs `groupId` set.
+  async function editMessage(id, userId, text) {
+    const message = await messages.findOne({ id }, NO_ID);
+    if (!message) return { error: 'not_found' };
+    if (message.from !== userId) return { error: 'forbidden' };
+    const trimmed = String(text || '').trim().slice(0, 4000);
+    if (!trimmed) return { error: 'empty' };
+    await messages.updateOne({ id }, { $set: { text: trimmed, editedAt: Date.now() } });
+    return { message: await messages.findOne({ id }, NO_ID) };
+  }
+
   async function createGroup(creatorId, name, memberIds) {
     const uniqueMembers = [...new Set(memberIds)];
     if (uniqueMembers.length < 2) return { error: 'need_more_members' };
@@ -347,6 +359,18 @@ async function createDb(mongoUri) {
     return all.slice(-limit);
   }
 
+  // Only the group's creator can delete it — any member can leave the
+  // conversation view aside, but wiping it for everyone else is scoped to
+  // whoever made it, same as most chat apps.
+  async function deleteGroup(groupId, userId) {
+    const group = await getGroupById(groupId);
+    if (!group) return { error: 'not_found' };
+    if (group.createdBy !== userId) return { error: 'forbidden' };
+    await groups.deleteOne({ id: groupId });
+    await messages.deleteMany({ groupId });
+    return { group };
+  }
+
   return {
     createAccount,
     authenticate,
@@ -364,6 +388,7 @@ async function createDb(mongoUri) {
     addMessage,
     getConversation,
     lastMessageWith,
+    editMessage,
     createGroup,
     getGroupById,
     isGroupMember,
@@ -372,6 +397,7 @@ async function createDb(mongoUri) {
     listGroupsForUser,
     addGroupMessage,
     getGroupConversation,
+    deleteGroup,
   };
 }
 

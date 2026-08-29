@@ -34,6 +34,7 @@ const state = {
   pendingAutoShare: null,
   pendingGroupContext: null, // { peerId } when creating a group from an active DM call
   editingGroupId: null,
+  editingMessageId: null, // id of the message currently showing its inline edit textarea
   volumePopoverTarget: null, // userId currently shown in the volume popover
   volumePopoverMode: 'voice', // 'voice' | 'share'
   focusedShareId: null, // 'self' | userId — which of possibly several simultaneous screen shares is in the big stage
@@ -154,6 +155,7 @@ const dom = {
   groupSettingsAddFriends: document.getElementById('group-settings-add-friends'),
   groupSettingsCancel: document.getElementById('group-settings-cancel'),
   groupSettingsSave: document.getElementById('group-settings-save'),
+  groupSettingsDelete: document.getElementById('group-settings-delete'),
 
   avatarContextMenu: document.getElementById('avatar-context-menu'),
   actxViewProfile: document.getElementById('actx-view-profile'),
@@ -191,6 +193,7 @@ const ICONS = {
   send: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-6.5 16-2.7-6.8L4 12Z"/></svg>',
   group: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8" r="2.8"/><path d="M3 19c0-2.8 2.5-5 5.5-5s5.5 2.2 5.5 5"/><circle cx="16.5" cy="8.5" r="2.2"/><path d="M15 14.3c2.3.3 4 2.2 4 4.7"/></svg>',
   gear: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.15-1.4l2-1.4-1.5-2.6-2.3.8a7 7 0 0 0-2.4-1.4L14.2 3h-4.4l-.4 2.6a7 7 0 0 0-2.4 1.4l-2.3-.8-1.5 2.6 2 1.4A7 7 0 0 0 5 12c0 .5.05.9.15 1.4l-2 1.4 1.5 2.6 2.3-.8a7 7 0 0 0 2.4 1.4l.4 2.6h4.4l.4-2.6a7 7 0 0 0 2.4-1.4l2.3.8 1.5-2.6-2-1.4c.1-.5.15-.9.15-1.4Z"/></svg>',
+  moreVertical: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
 };
 
 // ---------------- Boot ----------------
@@ -348,6 +351,7 @@ async function logout() {
     pendingAutoShare: null,
     pendingGroupContext: null,
     editingGroupId: null,
+    editingMessageId: null,
     volumePopoverTarget: null,
     volumePopoverMode: 'voice',
     focusedShareId: null,
@@ -436,6 +440,8 @@ function bindRealtimeEvents() {
     updateNavUnreadDot();
   });
 
+  on('message:edited', (message) => applyMessageEdit(message));
+
   on('group:created', (group) => {
     if (!state.groups.some((g) => g.id === group.id)) state.groups.push(group);
     else state.groups = state.groups.map((g) => (g.id === group.id ? group : g));
@@ -447,6 +453,19 @@ function bindRealtimeEvents() {
     if (idx >= 0) state.groups[idx] = group; else state.groups.push(group);
     renderDmList();
     if (state.selectedType === 'group' && state.selectedGroupId === group.id) renderChatMain();
+  });
+
+  on('group:deleted', ({ groupId }) => {
+    state.groups = state.groups.filter((g) => g.id !== groupId);
+    delete state.groupConversations[groupId];
+    if (groupCallManager.groupId === groupId) groupCallManager.leaveCall();
+    if (state.selectedType === 'group' && state.selectedGroupId === groupId) {
+      state.selectedType = null;
+      state.selectedGroupId = null;
+      toast('Este grupo foi excluído');
+    }
+    renderDmList();
+    if (state.activeTab === 'chat') renderChatMain();
   });
 
   // Who's currently on a group's call — kept live for every member, even
@@ -634,6 +653,11 @@ function wireStaticHandlers() {
   dom.chatSendBtn.addEventListener('click', sendMessage);
   wireEmojiPicker();
 
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.msg-actions')) return;
+    dom.chatMessages.querySelectorAll('.msg-actions-menu').forEach((m) => { m.hidden = true; });
+  });
+
   // Conversas: start a group directly, without needing an active call
   dom.dmNewGroupBtn.addEventListener('click', () => openCreateGroupModal());
 
@@ -664,6 +688,7 @@ function wireStaticHandlers() {
   // Group settings modal
   dom.groupSettingsCancel.addEventListener('click', closeGroupSettingsModal);
   dom.groupSettingsSave.addEventListener('click', confirmGroupSettings);
+  dom.groupSettingsDelete.addEventListener('click', deleteCurrentGroup);
   dom.groupSettingsAvatarEdit.addEventListener('click', async () => {
     const dataUrl = await pickImageOrToast('avatar');
     if (!dataUrl) return;
@@ -1169,6 +1194,7 @@ async function selectConversation(peerId) {
   state.selectedType = 'dm';
   state.selectedPeerId = peerId;
   state.selectedGroupId = null;
+  state.editingMessageId = null;
   const conv = state.conversations[peerId] || (state.conversations[peerId] = { messages: null, unread: 0 });
   if (conv.messages === null) {
     try {
@@ -1188,6 +1214,7 @@ async function selectGroupConversation(groupId) {
   state.selectedType = 'group';
   state.selectedGroupId = groupId;
   state.selectedPeerId = null;
+  state.editingMessageId = null;
   const conv = state.groupConversations[groupId] || (state.groupConversations[groupId] = { messages: null, unread: 0 });
   if (conv.messages === null) {
     try {
@@ -1383,21 +1410,20 @@ function renderChatMessages() {
   const messages = (conv && conv.messages) || [];
   dom.chatMessages.innerHTML = messages.map((m) => {
     const mine = m.from === state.currentUser.id;
-    if (mine) {
-      return `<div class="msg-row msg-row-out"><div class="msg-bubble-out">${linkifyHtml(m.text)}</div></div>`;
-    }
+    if (mine) return outgoingMessageHtml(m);
     return `
       <div class="msg-row">
         <div class="avatar msg-avatar" style="${avatarStyle(friend)}" ${friend ? `data-profile="${friend.id}"` : ''}>${friend ? avatarInner(friend) : ''}</div>
         <div class="msg-body">
           <div class="msg-meta"><span class="msg-author">${escapeHtml(friend ? friend.username : '')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
-          <div class="msg-text">${linkifyHtml(m.text)}</div>
+          <div class="msg-text">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>
         </div>
       </div>`;
   }).join('');
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
   wireMessageLinks();
   wireProfileContextMenus(dom.chatMessages);
+  wireMessageActions(dom.chatMessages);
 }
 
 function renderGroupChatMessages() {
@@ -1406,22 +1432,127 @@ function renderGroupChatMessages() {
   const messages = (conv && conv.messages) || [];
   dom.chatMessages.innerHTML = messages.map((m) => {
     const mine = m.from === state.currentUser.id;
-    if (mine) {
-      return `<div class="msg-row msg-row-out"><div class="msg-bubble-out">${linkifyHtml(m.text)}</div></div>`;
-    }
+    if (mine) return outgoingMessageHtml(m);
     const sender = group ? group.members.find((mem) => mem.id === m.from) : null;
     return `
       <div class="msg-row">
         <div class="avatar msg-avatar" style="${sender ? avatarStyle(sender) : ''}" ${sender ? `data-profile="${sender.id}"` : ''}>${sender ? avatarInner(sender) : ''}</div>
         <div class="msg-body">
           <div class="msg-meta"><span class="msg-author">${escapeHtml(sender ? sender.username : 'Alguém')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
-          <div class="msg-text">${linkifyHtml(m.text)}</div>
+          <div class="msg-text">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>
         </div>
       </div>`;
   }).join('');
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
   wireMessageLinks();
   wireProfileContextMenus(dom.chatMessages);
+  wireMessageActions(dom.chatMessages);
+}
+
+function editedTagHtml(m) {
+  return m.editedAt ? ' <span class="msg-edited-tag">(editada)</span>' : '';
+}
+
+// Shared by DM and group views: the outgoing bubble either shows its
+// normal read-only form, or — while state.editingMessageId matches — an
+// inline textarea in its place.
+function outgoingMessageHtml(m) {
+  if (state.editingMessageId === m.id) {
+    return `
+      <div class="msg-row msg-row-out" data-msg-id="${m.id}">
+        <div class="msg-edit-wrap">
+          <textarea class="msg-edit-input" rows="1">${escapeHtml(m.text)}</textarea>
+          <div class="msg-edit-hint">Enter para salvar · Esc para cancelar</div>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="msg-row msg-row-out" data-msg-id="${m.id}">
+      <div class="msg-actions">
+        <button class="msg-actions-btn" title="Mais opções">${ICONS.moreVertical}</button>
+        <div class="msg-actions-menu" hidden>
+          <button class="msg-actions-item" data-action="edit">Editar mensagem</button>
+        </div>
+      </div>
+      <div class="msg-bubble-out">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>
+    </div>`;
+}
+
+function wireMessageActions(container) {
+  container.querySelectorAll('.msg-actions-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = btn.nextElementSibling;
+      const wasHidden = menu.hidden;
+      container.querySelectorAll('.msg-actions-menu').forEach((m) => { m.hidden = true; });
+      menu.hidden = !wasHidden;
+    });
+  });
+  container.querySelectorAll('.msg-actions-item[data-action="edit"]').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const row = item.closest('.msg-row');
+      startEditingMessage(row.dataset.msgId);
+    });
+  });
+  const editWrap = container.querySelector('.msg-edit-wrap');
+  if (editWrap) wireMessageEditInput(editWrap.querySelector('.msg-edit-input'));
+}
+
+function startEditingMessage(id) {
+  state.editingMessageId = id;
+  if (state.selectedType === 'group') renderGroupChatMessages(); else renderChatMessages();
+}
+
+function cancelEditingMessage() {
+  state.editingMessageId = null;
+  if (state.selectedType === 'group') renderGroupChatMessages(); else renderChatMessages();
+}
+
+function wireMessageEditInput(input) {
+  if (!input) return;
+  const autoGrow = () => { input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; };
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  autoGrow();
+  input.addEventListener('input', autoGrow);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitMessageEdit(state.editingMessageId, input.value);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEditingMessage();
+    }
+  });
+}
+
+async function submitMessageEdit(id, text) {
+  const trimmed = text.trim();
+  if (!trimmed) { toast('A mensagem não pode ficar vazia', 'err'); return; }
+  state.editingMessageId = null;
+  try {
+    const res = await emit('message:edit', { id, text: trimmed });
+    applyMessageEdit(res.message);
+  } catch {
+    toast('Não foi possível editar a mensagem', 'err');
+    if (state.selectedType === 'group') renderGroupChatMessages(); else renderChatMessages();
+  }
+}
+
+function applyMessageEdit(message) {
+  if (message.groupId) {
+    const conv = state.groupConversations[message.groupId];
+    const idx = conv && conv.messages ? conv.messages.findIndex((m) => m.id === message.id) : -1;
+    if (idx >= 0) conv.messages[idx] = message;
+    if (state.selectedType === 'group' && state.selectedGroupId === message.groupId) renderGroupChatMessages();
+  } else {
+    const peerId = message.from === state.currentUser.id ? message.to : message.from;
+    const conv = state.conversations[peerId];
+    const idx = conv && conv.messages ? conv.messages.findIndex((m) => m.id === message.id) : -1;
+    if (idx >= 0) conv.messages[idx] = message;
+    if (state.selectedType === 'dm' && state.selectedPeerId === peerId) renderChatMessages();
+  }
 }
 
 // Links in chat must never navigate this window (see main.js's
@@ -2001,12 +2132,38 @@ function openGroupSettingsModal(group) {
       : 'Todos os seus amigos já estão neste grupo. Adicione mais amigos na aba Amigos, ou pelo perfil de alguém que já esteja aqui, para poder trazê-los também.';
   }
 
+  dom.groupSettingsDelete.hidden = group.createdBy !== state.currentUser.id;
+
   dom.groupSettingsModal.hidden = false;
 }
 
 function closeGroupSettingsModal() {
   dom.groupSettingsModal.hidden = true;
   state.editingGroupId = null;
+}
+
+async function deleteCurrentGroup() {
+  if (!state.editingGroupId) return;
+  const group = currentGroup(state.editingGroupId);
+  const groupName = group ? group.name : 'este grupo';
+  const sure = window.confirm(`Excluir "${groupName}" para sempre? Isso apaga o grupo e todas as mensagens dele para todo mundo. Essa ação não pode ser desfeita.`);
+  if (!sure) return;
+  const groupId = state.editingGroupId;
+  try {
+    await emit('group:delete', { groupId });
+    state.groups = state.groups.filter((g) => g.id !== groupId);
+    delete state.groupConversations[groupId];
+    if (state.selectedType === 'group' && state.selectedGroupId === groupId) {
+      state.selectedType = null;
+      state.selectedGroupId = null;
+    }
+    closeGroupSettingsModal();
+    renderDmList();
+    if (state.activeTab === 'chat') renderChatMain();
+    toast('Grupo excluído', 'ok');
+  } catch (err) {
+    toast(err.message === 'forbidden' ? 'Só quem criou o grupo pode excluí-lo' : 'Não foi possível excluir o grupo', 'err');
+  }
 }
 
 async function confirmGroupSettings() {

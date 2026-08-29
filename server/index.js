@@ -238,6 +238,26 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       ack && ack({ messages: history });
     });
 
+    // Shared by both DM and group messages — the message itself carries
+    // `to` or `groupId`, which decides who this gets broadcast to.
+    socket.on('message:edit', async ({ id, text }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const result = await db.editMessage(id, currentUserId, text);
+      if (result.error) return ack && ack({ error: result.error });
+      const { message } = result;
+      ack && ack({ ok: true, message });
+      if (message.groupId) {
+        const group = await db.getGroupById(message.groupId);
+        if (group) {
+          group.members.forEach((memberId) => {
+            if (memberId !== currentUserId) io.to(`user:${memberId}`).emit('message:edited', message);
+          });
+        }
+      } else if (message.to) {
+        io.to(`user:${message.to}`).emit('message:edited', message);
+      }
+    });
+
     // --- Groups ---
     socket.on('group:create', async ({ name, memberIds }, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
@@ -259,6 +279,19 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       const payload = await publicGroup(updated);
       updated.members.forEach((id) => io.to(`user:${id}`).emit('group:updated', payload));
       ack && ack({ ok: true, group: payload });
+    });
+
+    socket.on('group:delete', async ({ groupId }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const result = await db.deleteGroup(groupId, currentUserId);
+      if (result.error) return ack && ack({ error: result.error });
+      const participants = groupCallParticipants.get(groupId);
+      if (participants) {
+        participants.forEach((id) => io.to(`user:${id}`).emit('call:group-participant-left', { groupId, userId: id }));
+        groupCallParticipants.delete(groupId);
+      }
+      result.group.members.forEach((id) => io.to(`user:${id}`).emit('group:deleted', { groupId }));
+      ack && ack({ ok: true });
     });
 
     socket.on('group:add-members', async ({ groupId, memberIds }, ack) => {
