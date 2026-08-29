@@ -20,6 +20,13 @@ startServer(MONGODB_URI, { port, host })
       console.error(`Já existe um servidor rodando na porta ${port}.`);
     } else {
       console.error('Falha ao iniciar o servidor:', err);
+      if (err.name === 'MongoServerSelectionError') {
+        console.error(
+          '[orbit] Dica: isso costuma acontecer quando o IP deste servidor não está liberado no '
+          + 'Atlas. Em MongoDB Atlas > Network Access, adicione 0.0.0.0/0 ("Allow access from '
+          + 'anywhere") — o Render não tem IP de saída fixo no plano gratuito.'
+        );
+      }
     }
     process.exit(1);
   });
