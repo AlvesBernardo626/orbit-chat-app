@@ -120,7 +120,7 @@ async function createDb(mongoUri) {
     return user || null;
   }
 
-  async function updateUserProfile(id, { avatar, banner, statusMessage, username, tag }) {
+  async function updateUserProfile(id, { avatar, banner, statusMessage, username, tag, profileColor }) {
     const current = await getUserById(id);
     if (!current) return { error: 'not_found' };
     const patch = {};
@@ -128,6 +128,10 @@ async function createDb(mongoUri) {
     if (banner !== undefined) patch.banner = banner;
     if (statusMessage !== undefined) patch.statusMessage = String(statusMessage).slice(0, 140);
     if (username !== undefined) patch.username = String(username).trim().slice(0, 24);
+    if (profileColor !== undefined) {
+      if (profileColor !== null && !/^#[0-9a-f]{6}$/i.test(String(profileColor))) return { error: 'invalid_color' };
+      patch.profileColor = profileColor;
+    }
 
     let paddedTag = current.tag;
     if (tag !== undefined) {

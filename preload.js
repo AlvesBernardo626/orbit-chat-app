@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('orbit', {
   external: {
     open: (url) => ipcRenderer.invoke('shell:open-external', url),
   },
+  hotkey: {
+    onToggleMute: (callback) => ipcRenderer.on('hotkey:toggle-mute', callback),
+  },
   screenShare: {
     onPickRequest: (callback) => {
       ipcRenderer.on('screenshare:pick-request', (_event, sources) => callback(sources));

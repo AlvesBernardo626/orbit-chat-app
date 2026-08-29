@@ -170,6 +170,19 @@
               <div class="section-label" style="margin-top:22px;">Mensagem de status</div>
               <textarea id="profile-bio-input" class="bio-textarea" maxlength="140" placeholder="Compartilhe o que você está fazendo..."></textarea>
 
+              <div class="section-label" style="margin-top:22px;">Cor de fundo do perfil</div>
+              <div class="profile-color-picker">
+                <canvas id="profile-color-wheel" class="color-wheel-canvas" width="140" height="140"></canvas>
+                <div class="profile-color-controls">
+                  <label class="field-label" for="profile-color-brightness" style="margin-bottom:8px;">Brilho</label>
+                  <input id="profile-color-brightness" type="range" min="20" max="100" value="100" class="color-brightness-slider">
+                  <div class="profile-color-preview-row">
+                    <div id="profile-color-swatch" class="profile-color-swatch"></div>
+                    <button id="profile-color-reset" class="btn btn-ghost" type="button">Restaurar padrão</button>
+                  </div>
+                </div>
+              </div>
+
               <div class="profile-actions">
                 <span id="profile-save-hint" class="profile-save-hint"></span>
                 <button id="profile-save-btn" class="btn btn-primary">Salvar alterações</button>
@@ -345,7 +358,7 @@
   <!-- Full profile view for another user (or yourself), opened from the
        context menu above. -->
   <div id="user-profile-modal" class="modal-overlay" hidden>
-    <div class="user-profile-card">
+    <div id="user-profile-card" class="user-profile-card">
       <button id="user-profile-close" class="modal-close-btn" title="Fechar">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 5l14 14M19 5 5 19"/></svg>
       </button>

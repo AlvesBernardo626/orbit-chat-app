@@ -7,8 +7,12 @@ import {
   formatTime, formatDayTime, formatJoinDate, toast, el,
 } from './ui.js';
 import { EMOJI_CATEGORIES } from './emojiData.js';
+import { ColorWheel } from './colorWheel.js';
 
 const MAX_GROUP_MEMBERS = 10;
+const DEFAULT_WHEEL_HEX = '#7b6ef6';
+
+let profileColorWheel = null;
 
 const ringtoneAudio = new Audio('assets/ringtone.mp3');
 ringtoneAudio.loop = true;
@@ -78,6 +82,11 @@ const dom = {
   profileTagInput: document.getElementById('profile-tag-input'),
   statusOptions: document.getElementById('status-options'),
   profileBioInput: document.getElementById('profile-bio-input'),
+  profileColorWheel: document.getElementById('profile-color-wheel'),
+  profileColorBrightness: document.getElementById('profile-color-brightness'),
+  profileColorSwatch: document.getElementById('profile-color-swatch'),
+  profileColorReset: document.getElementById('profile-color-reset'),
+  profileCard: document.querySelector('#tab-profile .profile-card'),
   profileSaveBtn: document.getElementById('profile-save-btn'),
   profileSaveHint: document.getElementById('profile-save-hint'),
 
@@ -153,6 +162,7 @@ const dom = {
   volumePopoverValue: document.getElementById('volume-popover-value'),
 
   userProfileModal: document.getElementById('user-profile-modal'),
+  userProfileCard: document.getElementById('user-profile-card'),
   userProfileClose: document.getElementById('user-profile-close'),
   userProfileBanner: document.getElementById('user-profile-banner'),
   userProfileAvatar: document.getElementById('user-profile-avatar'),
@@ -183,6 +193,7 @@ const ICONS = {
 
 // ---------------- Boot ----------------
 window.orbit.screenShare.onPickRequest((sources) => showScreenSharePicker(sources));
+window.orbit.hotkey.onToggleMute(() => activeCallManager()?.toggleMic());
 
 boot();
 
@@ -526,6 +537,27 @@ function wireStaticHandlers() {
     }
   });
 
+  profileColorWheel = new ColorWheel(dom.profileColorWheel, {
+    onChange: (hex, committed) => {
+      dom.profileColorSwatch.style.backgroundColor = hex;
+      dom.profileCard.style.backgroundColor = hex;
+      if (committed) saveProfileColor(hex);
+    },
+  });
+  dom.profileColorBrightness.addEventListener('input', () => {
+    profileColorWheel.setValue(Number(dom.profileColorBrightness.value));
+    const hex = profileColorWheel.hex();
+    dom.profileColorSwatch.style.backgroundColor = hex;
+    dom.profileCard.style.backgroundColor = hex;
+  });
+  dom.profileColorBrightness.addEventListener('change', () => {
+    saveProfileColor(profileColorWheel.hex());
+  });
+  dom.profileColorReset.addEventListener('click', () => {
+    dom.profileCard.style.backgroundColor = '';
+    saveProfileColor(null);
+  });
+
   dom.statusOptions.querySelectorAll('.status-option').forEach((opt) => {
     opt.addEventListener('click', async () => {
       const status = opt.dataset.status;
@@ -696,6 +728,8 @@ function closeAvatarContextMenu() {
 
 // ---------------- User profile viewer ----------------
 function openUserProfile(user) {
+  dom.userProfileCard.style.backgroundColor = user.profileColor || '';
+  dom.userProfileStatusDot.style.borderColor = user.profileColor || '';
   dom.userProfileBanner.style.cssText = bannerStyle(user);
   dom.userProfileAvatar.style.cssText = avatarStyle(user);
   dom.userProfileAvatar.textContent = avatarInner(user);
@@ -930,6 +964,22 @@ function renderProfile() {
     opt.classList.toggle('selected', opt.dataset.status === u.status);
   });
   dom.profileBioInput.value = u.statusMessage || '';
+
+  dom.profileCard.style.backgroundColor = u.profileColor || '';
+  if (profileColorWheel) {
+    profileColorWheel.setFromHex(u.profileColor || DEFAULT_WHEEL_HEX);
+    dom.profileColorBrightness.value = String(Math.round(profileColorWheel.value));
+    dom.profileColorSwatch.style.backgroundColor = profileColorWheel.hex();
+  }
+}
+
+async function saveProfileColor(color) {
+  try {
+    const res = await emit('profile:update', { profileColor: color });
+    state.currentUser = res.user;
+  } catch {
+    toast('Não foi possível salvar a cor do perfil', 'err');
+  }
 }
 
 // ---------------- Conversas tab (DMs + Groups) ----------------
@@ -1587,6 +1637,7 @@ function renderCallView() {
         <div class="avatar avatar-lg" style="${avatarStyle(peer)}">${avatarInner(peer)}</div>
         <div class="participant-tile-name">${escapeHtml(peer.username)}</div>
         ${cm.state === 'calling' ? '<div class="participant-tile-name" style="font-weight:500;color:var(--text-tertiary);font-size:12px;">Chamando...</div>' : ''}
+        ${cm.remoteMicMuted ? `<div class="participant-mic-badge muted">${ICONS.micOff}</div>` : ''}
       </div>`;
 
     const peerTileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(peer.id)}"]`);
@@ -1650,6 +1701,7 @@ function renderGroupCallView() {
       <div class="participant-tile" data-speaking-key="${p.user.id}">
         <div class="avatar avatar-lg" style="${avatarStyle(p.user)}">${avatarInner(p.user)}</div>
         <div class="participant-tile-name">${escapeHtml(p.user.username || '')}</div>
+        ${p.micMuted ? `<div class="participant-mic-badge muted">${ICONS.micOff}</div>` : ''}
       </div>`).join('');
     dom.callViewBody.innerHTML = selfTile + peerTiles;
 

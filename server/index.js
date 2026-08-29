@@ -46,6 +46,7 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       tag: user.tag,
       avatar: user.avatar,
       banner: user.banner,
+      profileColor: user.profileColor || null,
       status: effectiveStatus(user),
       statusMessage: user.statusMessage,
       createdAt: user.createdAt,
@@ -65,6 +66,7 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       tag: user.tag,
       avatar: user.avatar,
       banner: user.banner,
+      profileColor: user.profileColor || null,
       status: user.status,
       statusMessage: user.statusMessage,
       createdAt: user.createdAt,
@@ -368,6 +370,16 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       ack && ack({ ok: true });
     });
 
+    socket.on('call:group-mic-state', ({ groupId, muted }, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      const participants = groupCallParticipants.get(groupId);
+      if (!participants || !participants.has(currentUserId)) return ack && ack({ error: 'not_in_call' });
+      participants.forEach((id) => {
+        if (id !== currentUserId) io.to(`user:${id}`).emit('call:group-mic-state', { groupId, userId: currentUserId, muted });
+      });
+      ack && ack({ ok: true });
+    });
+
     // --- Call signaling (relay only) ---
     const relay = (event) => async (payload, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
@@ -400,6 +412,7 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
     socket.on('call:ice-candidate', relay('call:ice-candidate'));
     socket.on('call:end', relay('call:end'));
     socket.on('screenshare:state', relay('screenshare:state'));
+    socket.on('call:mic-state', relay('call:mic-state'));
 
     socket.on('disconnect', async () => {
       if (!currentUserId) return;

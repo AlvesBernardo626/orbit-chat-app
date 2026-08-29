@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, nativeImage, session, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, nativeImage, session, shell, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -168,6 +168,13 @@ app.whenReady().then(async () => {
   setupDisplayMediaHandler();
   createWindow();
 
+  // Global mute toggle (works even while another app/game has focus, like
+  // Discord's mute hotkey) — Windows won't register a global shortcut made
+  // of only a modifier key, so this needs a real key alongside it.
+  globalShortcut.register('Alt+M', () => {
+    if (mainWindow) mainWindow.webContents.send('hotkey:toggle-mute');
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -175,4 +182,8 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });

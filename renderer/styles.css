@@ -19,7 +19,7 @@
   --red: #e5484d;
   --gray-status: #6d7178;
   --speaking: #3b82f6;
-  --speaking-glow: rgba(59, 130, 246, 0.5);
+  --speaking-glow: rgba(59, 130, 246, 0.35);
 }
 
 * { box-sizing: border-box; }
@@ -271,6 +271,20 @@ a { color: var(--accent); }
   resize: vertical; outline: none;
 }
 .bio-textarea:focus { border-color: var(--accent); }
+.profile-color-picker { display: flex; gap: 20px; align-items: flex-start; }
+.color-wheel-canvas { border-radius: 50%; cursor: crosshair; flex-shrink: 0; box-shadow: 0 0 0 1px var(--border-strong); touch-action: none; }
+.profile-color-controls { flex: 1; padding-top: 4px; }
+.color-brightness-slider {
+  -webkit-appearance: none; width: 100%; height: 6px; border-radius: 6px; outline: none;
+  background: linear-gradient(90deg, #000, #fff);
+}
+.color-brightness-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  border: 2px solid var(--bg-app); box-shadow: 0 0 0 1px var(--border-strong); cursor: pointer;
+}
+.profile-color-preview-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.profile-color-swatch { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border-strong); flex-shrink: 0; }
+
 .profile-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 22px; }
 .profile-save-hint { font-size: 12.5px; color: var(--green); opacity: 0; transition: opacity 0.2s; }
 .profile-save-hint.show { opacity: 1; }
@@ -396,8 +410,8 @@ a { color: var(--accent); }
   border: 2px solid transparent;
 }
 .participant-tile-name { font-size: 14px; font-weight: 700; color: #e8e9ec; }
-.avatar.speaking { box-shadow: 0 0 0 3px var(--speaking), 0 0 0 8px var(--speaking-glow); transition: box-shadow 100ms ease; }
-.screenshare-thumb .avatar.speaking { box-shadow: 0 0 0 2px var(--speaking), 0 0 0 5px var(--speaking-glow); }
+.avatar.speaking { box-shadow: 0 0 0 1.5px var(--speaking), 0 0 0 4px var(--speaking-glow); transition: box-shadow 100ms ease; }
+.screenshare-thumb .avatar.speaking { box-shadow: 0 0 0 1.5px var(--speaking), 0 0 0 3px var(--speaking-glow); }
 .participant-mic-badge {
   position: absolute; left: 14px; bottom: 14px; width: 26px; height: 26px; border-radius: 50%;
   background: var(--border-strong); display: flex; align-items: center; justify-content: center;

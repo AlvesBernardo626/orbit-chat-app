@@ -14,6 +14,7 @@ class GroupCallManager {
     this.connectedAt = null;
     this.localStream = null;
     this.micMuted = false;
+    this._micMutedBeforeDeafen = false;
     this.deafened = false;
     this.sharingLocal = false;
     this.localScreenStream = null;
@@ -40,6 +41,7 @@ class GroupCallManager {
     on('call:group-answer', (payload) => this._onAnswer(payload));
     on('call:group-ice-candidate', (payload) => this._onIceCandidate(payload));
     on('screenshare:group-state', (payload) => this._onRemoteScreenState(payload));
+    on('call:group-mic-state', (payload) => this._onRemoteMicState(payload));
   }
 
   async startGroupCall(group) {
@@ -110,6 +112,7 @@ class GroupCallManager {
     if (!track) return;
     track.enabled = !track.enabled;
     this.micMuted = !track.enabled;
+    this._broadcastMicState();
     this._notify();
   }
 
@@ -118,7 +121,27 @@ class GroupCallManager {
     this.peers.forEach((entry) => {
       if (entry.audioEl) entry.audioEl.muted = this.deafened;
     });
+
+    // Deafening also mutes the mic (like Discord) — and un-deafening
+    // restores whatever mute state the mic had right before, instead of
+    // always force-unmuting someone who had muted themselves on purpose.
+    const track = this.localStream && this.localStream.getAudioTracks()[0];
+    if (track) {
+      if (this.deafened) {
+        this._micMutedBeforeDeafen = this.micMuted;
+        track.enabled = false;
+        this.micMuted = true;
+      } else {
+        track.enabled = !this._micMutedBeforeDeafen;
+        this.micMuted = this._micMutedBeforeDeafen;
+      }
+      this._broadcastMicState();
+    }
     this._notify();
+  }
+
+  _broadcastMicState() {
+    if (this.groupId) emit('call:group-mic-state', { groupId: this.groupId, muted: this.micMuted }).catch(() => {});
   }
 
   async toggleScreenShare() {
@@ -280,6 +303,14 @@ class GroupCallManager {
     this._notify();
   }
 
+  _onRemoteMicState({ groupId, userId, muted }) {
+    if (groupId !== this.groupId) return;
+    const entry = this.peers.get(userId);
+    if (!entry) return;
+    entry.micMuted = !!muted;
+    this._notify();
+  }
+
   // ---- internals ----
 
   _ensurePeer(user) {
@@ -289,7 +320,7 @@ class GroupCallManager {
       return entry;
     }
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    entry = { pc, user, iceQueue: [], remoteAudioStream: null, remoteScreenStream: null, remoteSharing: false, screenSender: null, screenAudioSender: null, audioEl: null, speakingTracker: null };
+    entry = { pc, user, iceQueue: [], remoteAudioStream: null, remoteScreenStream: null, remoteSharing: false, micMuted: false, screenSender: null, screenAudioSender: null, audioEl: null, speakingTracker: null };
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         emit('call:group-ice-candidate', { groupId: this.groupId, to: user.id, candidate: event.candidate }).catch(() => {});
@@ -405,6 +436,7 @@ class GroupCallManager {
     }
     this.sharingLocal = false;
     this.micMuted = false;
+    this._micMutedBeforeDeafen = false;
     this.deafened = false;
   }
 

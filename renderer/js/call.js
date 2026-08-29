@@ -15,7 +15,9 @@ class CallManager {
     this.pc = null;
     this.localStream = null;
     this.micMuted = false;
+    this._micMutedBeforeDeafen = false;
     this.deafened = false;
+    this.remoteMicMuted = false;
     this.sharingLocal = false;
     this.localScreenStream = null;
     this.remoteSharing = false;
@@ -43,6 +45,7 @@ class CallManager {
     on('call:ice-candidate', (payload) => this._onIceCandidate(payload));
     on('call:end', (payload) => this._onRemoteEnd(payload));
     on('screenshare:state', (payload) => this._onRemoteScreenState(payload));
+    on('call:mic-state', (payload) => this._onRemoteMicState(payload));
   }
 
   async startCall(peerUser) {
@@ -98,6 +101,7 @@ class CallManager {
     if (!track) return;
     track.enabled = !track.enabled;
     this.micMuted = !track.enabled;
+    if (this.peer) emit('call:mic-state', { to: this.peer.id, muted: this.micMuted }).catch(() => {});
     this._notify();
   }
 
@@ -105,6 +109,22 @@ class CallManager {
     this.deafened = !this.deafened;
     const audioEl = document.getElementById('remote-audio');
     if (audioEl) audioEl.muted = this.deafened;
+
+    // Deafening also mutes the mic (like Discord) — and un-deafening
+    // restores whatever mute state the mic had right before, instead of
+    // always force-unmuting someone who had muted themselves on purpose.
+    const track = this.localStream && this.localStream.getAudioTracks()[0];
+    if (track) {
+      if (this.deafened) {
+        this._micMutedBeforeDeafen = this.micMuted;
+        track.enabled = false;
+        this.micMuted = true;
+      } else {
+        track.enabled = !this._micMutedBeforeDeafen;
+        this.micMuted = this._micMutedBeforeDeafen;
+      }
+      if (this.peer) emit('call:mic-state', { to: this.peer.id, muted: this.micMuted }).catch(() => {});
+    }
     this._notify();
   }
 
@@ -275,6 +295,12 @@ class CallManager {
     this._notify();
   }
 
+  _onRemoteMicState({ from, muted }) {
+    if (!this.peer || this.peer.id !== from) return;
+    this.remoteMicMuted = !!muted;
+    this._notify();
+  }
+
   // ---- internals ----
 
   _ensurePeerConnection() {
@@ -375,7 +401,9 @@ class CallManager {
     this._screenSender = null;
     this._screenAudioSender = null;
     this.micMuted = false;
+    this._micMutedBeforeDeafen = false;
     this.deafened = false;
+    this.remoteMicMuted = false;
     this._iceQueue = [];
   }
 
