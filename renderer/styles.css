@@ -295,6 +295,8 @@ a { color: var(--accent); }
 }
 .profile-color-hex-input::placeholder { color: var(--text-muted); text-transform: none; letter-spacing: normal; }
 
+.group-settings-add-empty { font-size: 13px; color: var(--text-tertiary); margin: 0 0 16px; line-height: 1.5; }
+
 .profile-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 22px; }
 .profile-save-hint { font-size: 12.5px; color: var(--green); opacity: 0; transition: opacity 0.2s; }
 .profile-save-hint.show { opacity: 1; }

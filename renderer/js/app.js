@@ -149,7 +149,7 @@ const dom = {
   groupSettingsAvatarEdit: document.getElementById('group-settings-avatar-edit'),
   groupSettingsName: document.getElementById('group-settings-name'),
   groupSettingsMembers: document.getElementById('group-settings-members'),
-  groupSettingsAddSection: document.getElementById('group-settings-add-section'),
+  groupSettingsAddEmpty: document.getElementById('group-settings-add-empty'),
   groupSettingsAddMax: document.getElementById('group-settings-add-max'),
   groupSettingsAddFriends: document.getElementById('group-settings-add-friends'),
   groupSettingsCancel: document.getElementById('group-settings-cancel'),
@@ -175,6 +175,7 @@ const dom = {
   userProfileBio: document.getElementById('user-profile-bio'),
   userProfileMemberSince: document.getElementById('user-profile-member-since'),
   userProfileMessageBtn: document.getElementById('user-profile-message-btn'),
+  userProfileFriendBtn: document.getElementById('user-profile-friend-btn'),
 };
 
 // ---------------- Icons ----------------
@@ -648,7 +649,6 @@ function wireStaticHandlers() {
   dom.callBarMic.addEventListener('click', () => activeCallManager()?.toggleMic());
   dom.callBarShare.addEventListener('click', () => activeCallManager()?.toggleScreenShare());
   dom.callBarGroup.addEventListener('click', () => openCreateGroupModal());
-  dom.callBarExpand.addEventListener('click', () => { state.callViewExpanded = true; renderChatMain(); });
   dom.callBarEnd.addEventListener('click', () => endActiveCall());
 
   // Screen share picker
@@ -771,14 +771,79 @@ function openUserProfile(user) {
   dom.userProfileMemberSince.textContent = formatJoinDate(user.createdAt);
 
   const isSelf = state.currentUser && user.id === state.currentUser.id;
-  dom.userProfileMessageBtn.hidden = isSelf;
+  const relation = isSelf ? 'self' : friendshipStatusWith(user.id);
+
+  dom.userProfileMessageBtn.hidden = relation !== 'friend';
   dom.userProfileMessageBtn.onclick = () => {
     closeUserProfile();
     switchTab('chat');
     selectConversation(user.id);
   };
 
+  dom.userProfileFriendBtn.hidden = !['none', 'outgoing', 'incoming'].includes(relation);
+  if (relation === 'none') {
+    dom.userProfileFriendBtn.textContent = 'Adicionar Amigo';
+    dom.userProfileFriendBtn.disabled = false;
+    dom.userProfileFriendBtn.className = 'btn btn-primary btn-block';
+    dom.userProfileFriendBtn.onclick = () => sendFriendRequestFromProfile(user);
+  } else if (relation === 'outgoing') {
+    dom.userProfileFriendBtn.textContent = 'Pedido de amizade enviado';
+    dom.userProfileFriendBtn.disabled = true;
+    dom.userProfileFriendBtn.className = 'btn btn-ghost btn-block';
+    dom.userProfileFriendBtn.onclick = null;
+  } else if (relation === 'incoming') {
+    dom.userProfileFriendBtn.textContent = 'Aceitar pedido de amizade';
+    dom.userProfileFriendBtn.disabled = false;
+    dom.userProfileFriendBtn.className = 'btn btn-primary btn-block';
+    dom.userProfileFriendBtn.onclick = () => acceptFriendRequestFromProfile(user);
+  }
+
   dom.userProfileModal.hidden = false;
+}
+
+function friendshipStatusWith(userId) {
+  if (state.friends.some((f) => f.id === userId)) return 'friend';
+  if (state.outgoing.some((f) => f.id === userId)) return 'outgoing';
+  if (state.incoming.some((f) => f.id === userId)) return 'incoming';
+  return 'none';
+}
+
+async function sendFriendRequestFromProfile(user) {
+  dom.userProfileFriendBtn.disabled = true;
+  try {
+    const res = await emit('friend:request', { username: user.username, tag: user.tag });
+    if (!state.outgoing.some((f) => f.id === res.target.id)) state.outgoing.push(res.target);
+    renderFriends();
+    toast(`Pedido enviado para ${res.target.username}#${res.target.tag}`, 'ok');
+    openUserProfile(user);
+  } catch (err) {
+    const messages = {
+      already_friends: 'Vocês já são amigos.',
+      already_pending: 'Já existe um pedido de amizade entre vocês.',
+    };
+    toast(messages[err.message] || 'Não foi possível enviar o pedido.', 'err');
+    dom.userProfileFriendBtn.disabled = false;
+  }
+}
+
+async function acceptFriendRequestFromProfile(user) {
+  const pending = state.incoming.find((f) => f.id === user.id);
+  if (!pending) return;
+  dom.userProfileFriendBtn.disabled = true;
+  try {
+    await emit('friend:respond', { friendshipId: pending.friendshipId, accept: true });
+    const res = await emit('friends:list');
+    state.friends = res.friends;
+    state.incoming = res.incoming;
+    state.outgoing = res.outgoing;
+    renderFriends();
+    renderDmList();
+    toast(`Você e ${user.username} agora são amigos`, 'ok');
+    openUserProfile(user);
+  } catch {
+    toast('Não foi possível aceitar o pedido.', 'err');
+    dom.userProfileFriendBtn.disabled = false;
+  }
 }
 
 function closeUserProfile() {
@@ -1907,10 +1972,10 @@ function openGroupSettingsModal(group) {
   const memberIds = new Set(group.members.map((m) => m.id));
   const addable = state.friends.filter((f) => !memberIds.has(f.id));
   const roomLeft = MAX_GROUP_MEMBERS - group.members.length;
+  dom.groupSettingsAddMax.textContent = String(Math.max(0, roomLeft));
 
   if (roomLeft > 0 && addable.length > 0) {
-    dom.groupSettingsAddSection.hidden = false;
-    dom.groupSettingsAddMax.textContent = String(roomLeft);
+    dom.groupSettingsAddEmpty.hidden = true;
     dom.groupSettingsAddFriends.innerHTML = addable.map((f) => `
       <div class="group-member-row" data-friend="${f.id}">
         <span class="group-member-checkbox"></span>
@@ -1929,8 +1994,11 @@ function openGroupSettingsModal(group) {
       });
     });
   } else {
-    dom.groupSettingsAddSection.hidden = true;
     dom.groupSettingsAddFriends.innerHTML = '';
+    dom.groupSettingsAddEmpty.hidden = false;
+    dom.groupSettingsAddEmpty.textContent = roomLeft <= 0
+      ? `Este grupo já está no limite de ${MAX_GROUP_MEMBERS} membros.`
+      : 'Todos os seus amigos já estão neste grupo. Adicione mais amigos na aba Amigos, ou pelo perfil de alguém que já esteja aqui, para poder trazê-los também.';
   }
 
   dom.groupSettingsModal.hidden = false;

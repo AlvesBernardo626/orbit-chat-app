@@ -337,9 +337,10 @@
       <input id="group-settings-name" class="text-input" type="text" maxlength="40" style="margin-bottom:16px;">
       <div class="field-label">Membros</div>
       <div id="group-settings-members" class="group-member-list" style="margin-bottom:16px;"></div>
-      <div id="group-settings-add-section" hidden>
+      <div id="group-settings-add-section">
         <div class="field-label">Adicionar membros (até <span id="group-settings-add-max">0</span>)</div>
         <div id="group-settings-add-friends" class="group-member-list" style="margin-bottom:16px;"></div>
+        <p id="group-settings-add-empty" class="group-settings-add-empty" hidden></p>
       </div>
       <div style="display:flex; gap:10px;">
         <button id="group-settings-cancel" class="btn btn-ghost" style="flex:1;">Cancelar</button>
@@ -393,6 +394,7 @@
         </div>
 
         <button id="user-profile-message-btn" class="btn btn-primary btn-block">Mensagem</button>
+        <button id="user-profile-friend-btn" class="btn btn-primary btn-block">Adicionar Amigo</button>
       </div>
     </div>
   </div>
