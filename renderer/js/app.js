@@ -194,6 +194,10 @@ const ICONS = {
 // ---------------- Boot ----------------
 window.orbit.screenShare.onPickRequest((sources) => showScreenSharePicker(sources));
 window.orbit.hotkey.onToggleMute(() => activeCallManager()?.toggleMic());
+window.orbit.update.onStatus(({ state }) => {
+  if (state === 'available') toast('Baixando atualização em segundo plano...');
+  if (state === 'ready') toast('Atualização pronta — reinicie o Orbit para aplicar.', 'ok');
+});
 
 boot();
 

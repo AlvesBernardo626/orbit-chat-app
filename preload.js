@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('orbit', {
   hotkey: {
     onToggleMute: (callback) => ipcRenderer.on('hotkey:toggle-mute', callback),
   },
+  update: {
+    onStatus: (callback) => ipcRenderer.on('update:status', (_event, payload) => callback(payload)),
+  },
   screenShare: {
     onPickRequest: (callback) => {
       ipcRenderer.on('screenshare:pick-request', (_event, sources) => callback(sources));

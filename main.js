@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, nativeImage, session, shell, globalShortcut } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 
@@ -136,6 +137,29 @@ function setupDisplayMediaHandler() {
   });
 }
 
+// Checks GitHub Releases for a newer published version, downloads it in the
+// background, and installs it the next time the app quits — so friends
+// running the installed (non-portable) build never need a new .exe sent to
+// them by hand again. Only makes sense for a packaged build: `npm start`
+// during development has no installed location to update in place.
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  const notify = (state) => {
+    if (mainWindow) mainWindow.webContents.send('update:status', { state });
+  };
+  autoUpdater.on('update-available', () => notify('available'));
+  autoUpdater.on('update-downloaded', () => notify('ready'));
+  autoUpdater.on('error', (err) => console.error('[orbit] erro ao verificar atualização:', err));
+
+  autoUpdater.checkForUpdates().catch(() => { /* offline or no releases yet — silently skip */ });
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch(() => {});
+  }, 60 * 60 * 1000);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -174,6 +198,8 @@ app.whenReady().then(async () => {
   globalShortcut.register('Alt+M', () => {
     if (mainWindow) mainWindow.webContents.send('hotkey:toggle-mute');
   });
+
+  setupAutoUpdate();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
