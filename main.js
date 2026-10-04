@@ -166,7 +166,7 @@ function createWindow() {
     height: 840,
     minWidth: 1000,
     minHeight: 660,
-    backgroundColor: '#1e1f22',
+    backgroundColor: '#0b0a10',
     autoHideMenuBar: true,
     title: 'Orbit',
     webPreferences: {

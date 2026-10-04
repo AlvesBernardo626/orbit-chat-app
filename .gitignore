@@ -3,3 +3,4 @@ data/
 dist/
 *.log
 atlas-credentials.env
+.claude/launch.json

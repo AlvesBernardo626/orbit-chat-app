@@ -11,7 +11,7 @@ import { EMOJI_CATEGORIES } from './emojiData.js';
 import { ColorWheel } from './colorWheel.js';
 
 const MAX_GROUP_MEMBERS = 10;
-const DEFAULT_WHEEL_HEX = '#7b6ef6';
+const DEFAULT_WHEEL_HEX = '#7c3aed';
 
 let profileColorWheel = null;
 
@@ -40,6 +40,8 @@ const state = {
   volumePopoverMode: 'voice', // 'voice' | 'share'
   focusedShareId: null, // 'self' | userId — which of possibly several simultaneous screen shares is in the big stage
   contextMenuUser: null, // full user object the avatar-context-menu is currently pointed at
+  friendsFilter: 'online', // 'online' | 'all' | 'pending'
+  dmSearch: '',
 };
 
 const dom = {
@@ -60,8 +62,35 @@ const dom = {
   logoutBtn: document.getElementById('logout-btn'),
 
   mainApp: document.getElementById('main-app'),
-  navIndicator: document.getElementById('nav-indicator'),
   chatUnreadDot: document.getElementById('chat-unread-dot'),
+  railHome: document.getElementById('rail-home'),
+  railGroups: document.getElementById('rail-groups'),
+  sidebarHome: document.getElementById('sidebar-home'),
+  sidebarGroup: document.getElementById('sidebar-group'),
+  sidebarGroupHeader: document.getElementById('sidebar-group-header'),
+  sidebarGroupName: document.getElementById('sidebar-group-name'),
+  sidebarGroupBody: document.getElementById('sidebar-group-body'),
+  sidebarFriendsBtn: document.getElementById('sidebar-friends-btn'),
+  friendsPendingBadge: document.getElementById('friends-pending-badge'),
+  dmSearch: document.getElementById('dm-search'),
+  userPanelMe: document.getElementById('user-panel-me'),
+  userPanelAvatar: document.getElementById('user-panel-avatar'),
+  userPanelDot: document.getElementById('user-panel-dot'),
+  userPanelName: document.getElementById('user-panel-name'),
+  userPanelStatus: document.getElementById('user-panel-status'),
+  userPanelMic: document.getElementById('user-panel-mic'),
+  userPanelDeafen: document.getElementById('user-panel-deafen'),
+  userPanelSettings: document.getElementById('user-panel-settings'),
+  asidePanel: document.getElementById('aside-panel'),
+
+  friendsFilter: document.getElementById('friends-filter'),
+  pendingCount: document.getElementById('pending-count'),
+  toggleAddFriend: document.getElementById('toggle-add-friend'),
+  addFriendPanel: document.getElementById('add-friend-panel'),
+  onlineSection: document.getElementById('online-section'),
+  offlineSection: document.getElementById('offline-section'),
+  friendsEmptyTitle: document.getElementById('friends-empty-title'),
+  friendsEmptySub: document.getElementById('friends-empty-sub'),
 
   addFriendInput: document.getElementById('add-friend-input'),
   addFriendBtn: document.getElementById('add-friend-btn'),
@@ -194,6 +223,10 @@ const ICONS = {
   send: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-6.5 16-2.7-6.8L4 12Z"/></svg>',
   group: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8" r="2.8"/><path d="M3 19c0-2.8 2.5-5 5.5-5s5.5 2.2 5.5 5"/><circle cx="16.5" cy="8.5" r="2.2"/><path d="M15 14.3c2.3.3 4 2.2 4 4.7"/></svg>',
   gear: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.15-1.4l2-1.4-1.5-2.6-2.3.8a7 7 0 0 0-2.4-1.4L14.2 3h-4.4l-.4 2.6a7 7 0 0 0-2.4 1.4l-2.3-.8-1.5 2.6 2 1.4A7 7 0 0 0 5 12c0 .5.05.9.15 1.4l-2 1.4 1.5 2.6 2.3-.8a7 7 0 0 0 2.4 1.4l.4 2.6h4.4l.4-2.6a7 7 0 0 0 2.4-1.4l2.3.8 1.5-2.6-2-1.4c.1-.5.15-.9.15-1.4Z"/></svg>',
+  back: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
+  speaker: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4Z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  chatBubble: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5v8c0 1.4-1.1 2.5-2.5 2.5H10l-4.5 4v-4H6.5C5.1 17 4 15.9 4 14.5v-8Z"/></svg>',
+  crown: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M3 8l4.5 3.5L12 5l4.5 6.5L21 8l-2 10H5L3 8Z"/></svg>',
   moreVertical: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
 };
 
@@ -357,7 +390,10 @@ async function logout() {
     volumePopoverMode: 'voice',
     focusedShareId: null,
     contextMenuUser: null,
+    friendsFilter: 'online',
+    dmSearch: '',
   });
+  dom.dmSearch.value = '';
 
   dom.mainApp.hidden = true;
   dom.onboarding.hidden = false;
@@ -499,24 +535,41 @@ function bindRealtimeEvents() {
 }
 
 // ---------------- Tabs ----------------
-const TAB_ORDER = ['friends', 'profile', 'chat'];
 function switchTab(tab) {
   state.activeTab = tab;
-  document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.tab === tab);
-  });
   document.querySelectorAll('.tab-panel').forEach((panel) => {
     panel.hidden = panel.id !== `tab-${tab}`;
   });
-  const idx = TAB_ORDER.indexOf(tab);
-  dom.navIndicator.style.top = `${26 + idx * 60}px`;
-  if (tab === 'chat') updateNavUnreadDot();
+  renderDmList();
+  renderUserPanel();
 }
 
+// Groups get their own unread badges on the rail; the home orbit's dot only
+// tracks direct messages.
 function updateNavUnreadDot() {
-  const dmUnread = Object.values(state.conversations).some((c) => c.unread > 0);
-  const groupUnread = Object.values(state.groupConversations).some((c) => c.unread > 0);
-  dom.chatUnreadDot.hidden = !((dmUnread || groupUnread) && state.activeTab !== 'chat');
+  dom.chatUnreadDot.hidden = !Object.values(state.conversations).some((c) => c.unread > 0);
+}
+
+function openDm(peerId) {
+  switchTab('chat');
+  selectConversation(peerId);
+}
+
+function openGroup(groupId) {
+  switchTab('chat');
+  selectGroupConversation(groupId);
+}
+
+function toggleMicFromPanel() {
+  const cm = activeCallManager();
+  if (!cm || cm.state !== 'connected') { toast('Você não está em uma chamada'); return; }
+  cm.toggleMic();
+}
+
+function toggleDeafenFromPanel() {
+  const cm = activeCallManager();
+  if (!cm || cm.state !== 'connected') { toast('Você não está em uma chamada'); return; }
+  cm.toggleDeafen();
 }
 
 async function pickImageOrToast(kind) {
@@ -527,11 +580,33 @@ async function pickImageOrToast(kind) {
 }
 
 function wireStaticHandlers() {
-  document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  // Navigation: rail, sidebar, user panel
+  dom.railHome.addEventListener('click', () => switchTab('friends'));
+  dom.sidebarFriendsBtn.addEventListener('click', () => switchTab('friends'));
+  dom.userPanelMe.addEventListener('click', () => switchTab('profile'));
+  dom.userPanelSettings.addEventListener('click', () => switchTab('profile'));
+  dom.userPanelMic.addEventListener('click', toggleMicFromPanel);
+  dom.userPanelDeafen.addEventListener('click', toggleDeafenFromPanel);
+  dom.dmSearch.addEventListener('input', () => {
+    state.dmSearch = dom.dmSearch.value.trim().toLowerCase();
+    renderDmList();
+  });
+  dom.sidebarGroupHeader.addEventListener('click', () => {
+    const group = currentGroup(state.selectedGroupId);
+    if (group) openGroupSettingsModal(group);
   });
 
   // Friends
+  dom.friendsFilter.querySelectorAll('[data-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.friendsFilter = btn.dataset.filter;
+      renderFriends();
+    });
+  });
+  dom.toggleAddFriend.addEventListener('click', () => {
+    dom.addFriendPanel.hidden = !dom.addFriendPanel.hidden;
+    if (!dom.addFriendPanel.hidden) dom.addFriendInput.focus();
+  });
   dom.addFriendBtn.addEventListener('click', submitAddFriend);
   dom.addFriendInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAddFriend();
@@ -966,7 +1041,36 @@ function renderFriends() {
   dom.offlineLabel.textContent = `Offline — ${offline.length}`;
   dom.offlineList.innerHTML = offline.map((u) => friendRowHtml(u)).join('');
 
-  dom.friendsEmptyState.hidden = state.friends.length > 0;
+  const filter = state.friendsFilter;
+  dom.friendsFilter.querySelectorAll('[data-filter]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
+  const pendingTotal = state.incoming.length;
+  dom.pendingCount.hidden = pendingTotal === 0;
+  dom.pendingCount.textContent = String(pendingTotal);
+  dom.friendsPendingBadge.hidden = pendingTotal === 0;
+  dom.friendsPendingBadge.textContent = String(pendingTotal);
+
+  dom.pendingSection.hidden = filter !== 'pending' || state.incoming.length === 0;
+  dom.outgoingSection.hidden = filter !== 'pending' || state.outgoing.length === 0;
+  dom.onlineSection.hidden = filter === 'pending' || online.length === 0;
+  dom.offlineSection.hidden = filter !== 'all' || offline.length === 0;
+
+  let empty = null;
+  if (filter === 'pending') {
+    if (state.incoming.length + state.outgoing.length === 0) {
+      empty = ['Nenhum pedido pendente', 'Pedidos de amizade que você enviar ou receber aparecem aqui.'];
+    }
+  } else if (state.friends.length === 0) {
+    empty = ['Você ainda não tem amigos por aqui.', 'Clique em <strong>Adicionar amigo</strong> e use o nome e a tag, como <strong>usuario#0001</strong>.'];
+  } else if (filter === 'online' && online.length === 0) {
+    empty = ['Ninguém online agora', 'Seus amigos aparecem aqui assim que ficarem online. Veja todos em <strong>Todos</strong>.'];
+  }
+  dom.friendsEmptyState.hidden = !empty;
+  if (empty) {
+    dom.friendsEmptyTitle.textContent = empty[0];
+    dom.friendsEmptySub.innerHTML = empty[1];
+  }
 
   dom.pendingList.querySelectorAll('[data-accept]').forEach((btn) => {
     btn.addEventListener('click', () => respondFriendRequest(btn.dataset.accept, true));
@@ -977,28 +1081,26 @@ function renderFriends() {
   dom.outgoingList.querySelectorAll('[data-cancel]').forEach((btn) => {
     btn.addEventListener('click', () => cancelOutgoingRequest(btn.dataset.cancel));
   });
-  document.querySelectorAll('[data-chat-with]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      switchTab('chat');
-      selectConversation(btn.dataset.chatWith);
-    });
+  const friendsTab = document.getElementById('tab-friends');
+  friendsTab.querySelectorAll('[data-chat-with]').forEach((btn) => {
+    btn.addEventListener('click', () => openDm(btn.dataset.chatWith));
   });
-  document.querySelectorAll('[data-call-with]').forEach((btn) => {
+  friendsTab.querySelectorAll('[data-call-with]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const friend = state.friends.find((f) => f.id === btn.dataset.callWith);
       if (!friend) return;
-      switchTab('chat');
-      selectConversation(friend.id);
+      openDm(friend.id);
       requestCall(friend);
     });
   });
+  renderAside();
 
   wireProfileContextMenus(document.getElementById('tab-friends'));
 }
 
 function friendRowHtml(u) {
   const isOffline = u.status === 'offline';
-  const sub = isOffline ? 'Offline' : (u.statusMessage || statusLabel(u.status));
+  const sub = isOffline ? 'Offline' : (u.statusMessage || availabilityLabel(u.status));
   return `
   <div class="friend-row ${isOffline ? 'offline' : ''}">
     <div class="friend-row-avatar" data-profile="${u.id}">
@@ -1006,7 +1108,7 @@ function friendRowHtml(u) {
       <span class="status-dot ${statusDotClass(u.status)}"></span>
     </div>
     <div class="friend-row-info">
-      <div class="friend-row-name">${escapeHtml(u.username)}<span style="color:var(--text-muted);font-weight:600;">#${u.tag}</span></div>
+      <div class="friend-row-name">${escapeHtml(u.username)}<span class="friend-row-tag">#${u.tag}</span></div>
       <div class="friend-row-sub">${escapeHtml(sub)}</div>
     </div>
     <div class="friend-row-actions">
@@ -1023,7 +1125,7 @@ function friendRequestRowHtml(u, isIncoming) {
       <div class="avatar avatar-md" style="${avatarStyle(u)}">${avatarInner(u)}</div>
     </div>
     <div class="friend-row-info">
-      <div class="friend-row-name">${escapeHtml(u.username)}<span style="color:var(--text-muted);font-weight:600;">#${u.tag}</span></div>
+      <div class="friend-row-name">${escapeHtml(u.username)}<span class="friend-row-tag">#${u.tag}</span></div>
       <div class="friend-row-sub">${isIncoming ? 'Quer ser seu amigo' : 'Pedido enviado — aguardando resposta'}</div>
     </div>
     <div class="friend-row-actions">
@@ -1089,6 +1191,41 @@ function renderProfile() {
     dom.profileColorBrightness.value = String(Math.round(profileColorWheel.value));
     syncColorPreview(profileColorWheel.hex());
   }
+  // The wheel always shows a color, but the card only takes one once the
+  // person actually picked it.
+  dom.profileCard.style.backgroundColor = u.profileColor || '';
+  renderUserPanel();
+}
+
+function availabilityLabel(status) {
+  if (status === 'online') return 'Disponível';
+  if (status === 'invisible') return 'Invisível';
+  return statusLabel(status);
+}
+
+// Bottom-left "you" panel. Mic/deafen mirror the active call and look idle
+// when there's no call to act on.
+function renderUserPanel() {
+  const u = state.currentUser;
+  if (!u) return;
+  dom.userPanelAvatar.style.cssText = avatarStyle(u);
+  dom.userPanelAvatar.textContent = avatarInner(u);
+  dom.userPanelDot.className = `status-dot ${statusDotClass(u.status === 'invisible' ? 'offline' : u.status)}`;
+  dom.userPanelName.textContent = u.username;
+  dom.userPanelStatus.textContent = u.statusMessage || availabilityLabel(u.status);
+
+  const cm = activeCallManager();
+  const live = !!cm && cm.state === 'connected';
+  const muted = live && cm.micMuted;
+  const deafened = live && cm.deafened;
+  dom.userPanelMic.innerHTML = muted ? ICONS.micOff : ICONS.mic;
+  dom.userPanelMic.classList.toggle('is-off', muted);
+  dom.userPanelMic.classList.toggle('is-idle', !live);
+  dom.userPanelDeafen.innerHTML = ICONS.headphones;
+  dom.userPanelDeafen.classList.toggle('is-off', deafened);
+  dom.userPanelDeafen.classList.toggle('is-idle', !live);
+  dom.userPanelSettings.innerHTML = ICONS.gear;
+  dom.userPanelSettings.classList.toggle('active', state.activeTab === 'profile');
 }
 
 function syncColorPreview(hex, updateHexInput = true) {
@@ -1106,84 +1243,253 @@ async function saveProfileColor(color) {
   }
 }
 
-// ---------------- Conversas tab (DMs + Groups) ----------------
+// ---------------- Navigation: rail, sidebar, right column ----------------
+// The sidebar shows a group's own panel only while that group's chat is open;
+// everywhere else (friends, profile, DMs) it's the home list.
+function viewingGroup() {
+  return state.activeTab === 'chat' && state.selectedType === 'group' ? currentGroup(state.selectedGroupId) : null;
+}
+
+// Name kept from when this only drew the DM list: it's called after nearly
+// every state change, so it now refreshes all navigation chrome at once.
 function renderDmList() {
-  const dmRows = state.friends.map((f) => {
-    const conv = state.conversations[f.id];
-    const lastMsg = conv && conv.messages && conv.messages.length ? conv.messages[conv.messages.length - 1] : null;
-    return { type: 'dm', id: f.id, entity: f, lastMsg, unread: conv ? conv.unread : 0 };
-  });
-  const groupRows = state.groups.map((g) => {
+  if (!state.currentUser) return;
+  const group = viewingGroup();
+  renderRail(group);
+  dom.sidebarHome.hidden = !!group;
+  dom.sidebarGroup.hidden = !group;
+  if (group) renderGroupSidebar(group); else renderHomeSidebar();
+  renderAside();
+}
+
+function renderRail(activeGroup) {
+  dom.railHome.classList.toggle('active', !activeGroup);
+  dom.railGroups.innerHTML = state.groups.map((g) => {
     const conv = state.groupConversations[g.id];
-    const lastMsg = conv && conv.messages && conv.messages.length ? conv.messages[conv.messages.length - 1] : null;
-    return { type: 'group', id: g.id, entity: g, lastMsg, unread: conv ? conv.unread : 0 };
+    const unread = conv ? conv.unread : 0;
+    const live = (g.activeCallMemberIds || []).length > 0;
+    const groupLike = groupAsAvatarLike(g);
+    let marker = '';
+    if (unread > 0) marker = `<span class="rail-badge">${unread > 99 ? '99+' : unread}</span>`;
+    else if (live) marker = `<span class="rail-live">${ICONS.speaker.replace(/width="18" height="18"/, 'width="11" height="11"')}</span>`;
+    return `
+      <button class="rail-group ${activeGroup && activeGroup.id === g.id ? 'active' : ''}" data-rail-group="${g.id}" title="${escapeHtml(g.name)}">
+        <div class="avatar" style="${avatarStyle(groupLike)}">${avatarInner(groupLike)}</div>
+        ${marker}
+      </button>`;
+  }).join('');
+  dom.railGroups.querySelectorAll('[data-rail-group]').forEach((btn) => {
+    btn.addEventListener('click', () => openGroup(btn.dataset.railGroup));
   });
-  const rows = [...dmRows, ...groupRows];
+}
+
+function renderHomeSidebar() {
+  dom.sidebarFriendsBtn.classList.toggle('active', state.activeTab === 'friends');
+  const rows = state.friends
+    .filter((f) => !state.dmSearch || f.username.toLowerCase().includes(state.dmSearch))
+    .map((f) => {
+      const conv = state.conversations[f.id];
+      const lastMsg = conv && conv.messages && conv.messages.length ? conv.messages[conv.messages.length - 1] : null;
+      return { id: f.id, entity: f, lastMsg, unread: conv ? conv.unread : 0 };
+    });
   rows.sort((a, b) => (b.lastMsg?.createdAt || 0) - (a.lastMsg?.createdAt || 0));
 
   dom.dmListEmpty.hidden = rows.length > 0;
-  dom.dmListItems.innerHTML = rows.map((row) => {
-    if (row.type === 'dm') return dmRowHtml(row);
-    return groupRowHtml(row);
-  }).join('');
-
+  dom.dmListEmpty.textContent = state.dmSearch
+    ? 'Nenhuma conversa encontrada.'
+    : 'Adicione amigos para começar a conversar.';
+  dom.dmListItems.innerHTML = rows.map(dmRowHtml).join('');
   dom.dmListItems.querySelectorAll('[data-peer]').forEach((rowEl) => {
-    rowEl.addEventListener('click', () => selectConversation(rowEl.dataset.peer));
+    rowEl.addEventListener('click', () => openDm(rowEl.dataset.peer));
   });
-  dom.dmListItems.querySelectorAll('[data-group]').forEach((rowEl) => {
-    rowEl.addEventListener('click', () => selectGroupConversation(rowEl.dataset.group));
-  });
-
   wireProfileContextMenus(dom.dmListItems);
 }
 
 function dmRowHtml({ id, entity: friend, lastMsg, unread }) {
   const preview = lastMsg
     ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : ''}${escapeHtml(lastMsg.text)}`
-    : '<span style="color:var(--text-muted);">Diga oi!</span>';
-  const time = lastMsg ? formatDayTime(lastMsg.createdAt) : '';
+    : escapeHtml(friend.status === 'offline' ? 'Offline' : (friend.statusMessage || availabilityLabel(friend.status)));
   const inCall = callManager.state !== 'idle' && callManager.peer && callManager.peer.id === friend.id;
-  const selected = state.selectedType === 'dm' && state.selectedPeerId === id;
+  const selected = state.activeTab === 'chat' && state.selectedType === 'dm' && state.selectedPeerId === id;
   return `
-  <div class="dm-row ${selected ? 'selected' : ''}" data-peer="${id}">
+  <div class="dm-row ${selected ? 'selected' : ''} ${unread > 0 ? 'unread' : ''}" data-peer="${id}">
     <div class="dm-row-avatar" data-profile="${id}">
       <div class="avatar avatar-md" style="${avatarStyle(friend)}">${avatarInner(friend)}</div>
       <span class="status-dot ${statusDotClass(friend.status)}"></span>
     </div>
     <div class="dm-row-info">
       <div class="dm-row-name">${escapeHtml(friend.username)}</div>
-      <div class="dm-row-preview">${inCall ? '<span style="color:var(--accent);font-weight:600;">Em chamada</span>' : preview}</div>
+      <div class="dm-row-preview">${inCall ? '<span class="dm-row-live">Em chamada</span>' : preview}</div>
     </div>
-    <div class="dm-row-meta">
-      <div class="dm-row-time">${time}</div>
-      ${unread > 0 ? `<div class="dm-row-unread">${unread}</div>` : ''}
-    </div>
+    ${unread > 0 ? `<div class="dm-row-meta"><div class="dm-row-unread">${unread}</div></div>` : ''}
   </div>`;
 }
 
-function groupRowHtml({ id, entity: group, lastMsg, unread }) {
-  const senderName = lastMsg ? memberName(group, lastMsg.from) : '';
-  const preview = lastMsg
-    ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : `${escapeHtml(senderName)}: `}${escapeHtml(lastMsg.text)}`
-    : `<span style="color:var(--text-muted);">${group.members.length} membros</span>`;
-  const time = lastMsg ? formatDayTime(lastMsg.createdAt) : '';
-  const callCount = (group.activeCallMemberIds || []).length;
-  const selected = state.selectedType === 'group' && state.selectedGroupId === id;
-  const groupLike = groupAsAvatarLike(group);
-  return `
-  <div class="dm-row ${selected ? 'selected' : ''}" data-group="${id}">
-    <div class="dm-row-avatar">
-      <div class="avatar avatar-md" style="${avatarStyle(groupLike)}">${avatarInner(groupLike)}</div>
-    </div>
-    <div class="dm-row-info">
-      <div class="dm-row-name">${escapeHtml(group.name)}</div>
-      <div class="dm-row-preview">${callCount > 0 ? `<span style="color:var(--accent);font-weight:600;">Em chamada · ${callCount}</span>` : preview}</div>
-    </div>
-    <div class="dm-row-meta">
-      <div class="dm-row-time">${time}</div>
-      ${unread > 0 ? `<div class="dm-row-unread">${unread}</div>` : ''}
-    </div>
-  </div>`;
+function groupCallMembers(group) {
+  return (group.activeCallMemberIds || [])
+    .map((id) => (id === state.currentUser.id ? state.currentUser : group.members.find((m) => m.id === id)))
+    .filter(Boolean);
+}
+
+function renderGroupSidebar(group) {
+  dom.sidebarGroupName.textContent = group.name;
+  const inThisCall = groupCallManager.state !== 'idle' && groupCallManager.groupId === group.id;
+  const callMembers = groupCallMembers(group);
+  dom.sidebarGroupBody.innerHTML = `
+    <div class="side-label">Conversa</div>
+    <button class="side-item active" data-group-chat>
+      ${ICONS.chatBubble}<span>Chat do grupo</span>
+    </button>
+    <div class="side-label">Chamada de voz</div>
+    <button class="side-item ${inThisCall ? 'has-unread' : ''}" data-group-voice title="${inThisCall ? 'Abrir chamada' : (callMembers.length ? 'Entrar na chamada' : 'Iniciar chamada')}">
+      ${ICONS.speaker}<span>Sala de voz</span>${callMembers.length ? '<span class="live-dot"></span>' : ''}
+    </button>
+    ${callMembers.length ? `<div class="voice-roster">${callMembers.map((u) => `
+      <div class="voice-roster-item" data-profile="${u.id}">
+        <div class="avatar" style="${avatarStyle(u)}">${avatarInner(u)}</div>
+        <span>${escapeHtml(u.username)}</span>
+      </div>`).join('')}</div>` : ''}`;
+
+  dom.sidebarGroupBody.querySelector('[data-group-chat]').addEventListener('click', () => {
+    if (isCallViewShowing()) state.callViewExpanded = false;
+    renderChatMain();
+  });
+  dom.sidebarGroupBody.querySelector('[data-group-voice]').addEventListener('click', () => requestGroupCall(group));
+  wireProfileContextMenus(dom.sidebarGroupBody);
+}
+
+// ---------------- Right column ----------------
+function renderAside() {
+  if (!state.currentUser) return;
+  const tab = state.activeTab;
+  dom.asidePanel.hidden = tab === 'profile';
+  dom.mainApp.classList.toggle('no-aside', dom.asidePanel.hidden);
+  if (tab === 'friends') { renderActivityAside(); return; }
+  if (tab !== 'chat') return;
+  if (state.selectedType === 'group') {
+    const group = currentGroup(state.selectedGroupId);
+    if (group) { renderGroupMembersAside(group); return; }
+  }
+  if (state.selectedType === 'dm') {
+    const friend = currentFriend(state.selectedPeerId);
+    if (friend) { renderPeerAside(friend); return; }
+  }
+  renderActivityAside();
+}
+
+// "Ativo agora": every group call you could hop into, plus your own call.
+function renderActivityAside() {
+  const cards = [];
+
+  if (callManager.state !== 'idle' && callManager.peer) {
+    const peer = callManager.peer;
+    cards.push(`
+      <div class="activity-card">
+        <div class="activity-card-head">
+          <div class="avatar avatar-md" style="${avatarStyle(peer)}">${avatarInner(peer)}</div>
+          <div>
+            <div class="activity-card-name">${escapeHtml(peer.username)}</div>
+            <div class="activity-card-sub">${callManager.state === 'connected' ? 'Em chamada com você' : 'Chamando...'}</div>
+          </div>
+        </div>
+        <div class="activity-card-room">
+          <span class="activity-card-room-name">Chamada privada</span>
+          <button class="btn btn-primary btn-small" data-open-call>Abrir</button>
+        </div>
+      </div>`);
+  }
+
+  state.groups.forEach((g) => {
+    const members = groupCallMembers(g);
+    if (members.length === 0) return;
+    const inIt = groupCallManager.state !== 'idle' && groupCallManager.groupId === g.id;
+    const first = members[0];
+    const sharing = inIt && (groupCallManager.sharingLocal || groupCallManager.participantList().some((p) => p.remoteSharing));
+    cards.push(`
+      <div class="activity-card">
+        <div class="activity-card-head">
+          <div class="avatar avatar-md" style="${avatarStyle(first)}" data-profile="${first.id}">${avatarInner(first)}</div>
+          <div>
+            <div class="activity-card-name">${escapeHtml(first.id === state.currentUser.id ? 'Você' : first.username)}${members.length > 1 ? ` e mais ${members.length - 1}` : ''}</div>
+            <div class="activity-card-sub">${sharing ? 'Compartilhando a tela' : 'Em chamada de voz'}</div>
+          </div>
+        </div>
+        <div class="activity-card-room">
+          <span class="activity-card-room-name">${escapeHtml(g.name)}</span>
+          <button class="btn btn-primary btn-small" data-join-group="${g.id}">${inIt ? 'Abrir' : 'Entrar'}</button>
+        </div>
+      </div>`);
+  });
+
+  dom.asidePanel.innerHTML = `
+    <div class="aside-title">Ativo agora</div>
+    ${cards.length ? cards.join('') : `
+      <div class="aside-empty">
+        <strong>Tudo quieto por aqui</strong>
+        Quando alguém começar uma chamada em um grupo seu, ela aparece aqui pra você entrar.
+      </div>`}`;
+
+  const openBtn = dom.asidePanel.querySelector('[data-open-call]');
+  if (openBtn) openBtn.addEventListener('click', () => { state.callViewExpanded = true; renderChatMain(); });
+  dom.asidePanel.querySelectorAll('[data-join-group]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const group = currentGroup(btn.dataset.joinGroup);
+      if (!group) return;
+      openGroup(group.id);
+      requestGroupCall(group);
+    });
+  });
+  wireProfileContextMenus(dom.asidePanel);
+}
+
+function renderPeerAside(friend) {
+  const bio = friend.statusMessage && friend.statusMessage.trim();
+  dom.asidePanel.innerHTML = `
+    <div class="peer-card" style="${friend.profileColor ? `background-color:${friend.profileColor};` : ''}">
+      <div class="peer-card-banner" style="${bannerStyle(friend)}"></div>
+      <div class="peer-card-body">
+        <div class="peer-card-avatar" data-profile="${friend.id}">
+          <div class="avatar" style="${avatarStyle(friend)}${friend.profileColor ? `box-shadow:0 0 0 5px ${friend.profileColor};` : ''}">${avatarInner(friend)}</div>
+          <span class="status-dot ${statusDotClass(friend.status)}" style="${friend.profileColor ? `border-color:${friend.profileColor};` : ''}"></span>
+        </div>
+        <div class="peer-card-name">${escapeHtml(friend.username)}</div>
+        <div class="peer-card-tag">#${friend.tag} · ${friend.status === 'offline' ? 'Offline' : availabilityLabel(friend.status)}</div>
+        ${bio ? `<div class="peer-card-section"><div class="peer-card-section-title">Sobre</div><div>${escapeHtml(bio)}</div></div>` : ''}
+        <div class="peer-card-section"><div class="peer-card-section-title">Membro desde</div><div>${formatJoinDate(friend.createdAt)}</div></div>
+      </div>
+    </div>`;
+  wireProfileContextMenus(dom.asidePanel);
+}
+
+function memberStatus(member) {
+  if (member.id === state.currentUser.id) return state.currentUser.status === 'invisible' ? 'offline' : state.currentUser.status;
+  const friend = state.friends.find((f) => f.id === member.id);
+  return (friend || member).status || 'offline';
+}
+
+function renderGroupMembersAside(group) {
+  const members = group.members.map((m) => {
+    const fresh = m.id === state.currentUser.id ? state.currentUser : (state.friends.find((f) => f.id === m.id) || m);
+    return { ...m, ...fresh, status: memberStatus(m) };
+  });
+  const online = members.filter((m) => m.status !== 'offline');
+  const offline = members.filter((m) => m.status === 'offline');
+  const inCall = new Set(group.activeCallMemberIds || []);
+  const row = (m) => `
+    <div class="member-row ${m.status === 'offline' ? 'offline' : ''}" data-profile="${m.id}">
+      <div class="member-row-avatar">
+        <div class="avatar avatar-md" style="${avatarStyle(m)}">${avatarInner(m)}</div>
+        <span class="status-dot ${statusDotClass(m.status)}"></span>
+      </div>
+      <div style="min-width:0;">
+        <div class="member-row-name">${escapeHtml(m.username)}${m.id === group.createdBy ? `<span class="member-row-crown" title="Criou o grupo">${ICONS.crown}</span>` : ''}</div>
+        <div class="member-row-sub">${inCall.has(m.id) ? 'Na sala de voz' : escapeHtml(m.status === 'offline' ? 'Offline' : (m.statusMessage || availabilityLabel(m.status)))}</div>
+      </div>
+    </div>`;
+  dom.asidePanel.innerHTML = `
+    ${online.length ? `<div class="aside-members-block"><div class="section-label">Online — ${online.length}</div>${online.map(row).join('')}</div>` : ''}
+    ${offline.length ? `<div class="aside-members-block"><div class="section-label">Offline — ${offline.length}</div>${offline.map(row).join('')}</div>` : ''}`;
+  wireProfileContextMenus(dom.asidePanel);
 }
 
 function memberName(group, userId) {
@@ -1251,12 +1557,11 @@ function currentGroup(groupId) {
 function renderChatMain() {
   const cm = activeCallManager();
   const callActive = cm !== null;
-  dom.callBar.hidden = !callActive;
+  dom.callBar.hidden = !callActive || state.callViewExpanded;
   if (callActive) renderCallBar(cm);
+  renderUserPanel();
 
   if (callActive && state.callViewExpanded) {
-    dom.chatEmpty.hidden = true;
-    dom.chatTextView.hidden = true;
     dom.callView.hidden = false;
     if (cm === callManager) renderCallView(); else renderGroupCallView();
     return;
@@ -1289,6 +1594,7 @@ function renderChatMain() {
 }
 
 function renderChatHeader(friend) {
+  dom.chatInput.placeholder = `Conversar com ${friend.username}`;
   const inCallWithFriend = callManager.state !== 'idle' && callManager.peer && callManager.peer.id === friend.id;
   dom.chatHeader.innerHTML = `
     <div class="chat-header-user">
@@ -1296,10 +1602,9 @@ function renderChatHeader(friend) {
         <div class="avatar avatar-sm" style="${avatarStyle(friend)}">${avatarInner(friend)}</div>
         <span class="status-dot ${statusDotClass(friend.status)}"></span>
       </div>
-      <div>
-        <div class="chat-header-name">${escapeHtml(friend.username)}</div>
-        <div class="chat-header-status">${friend.status === 'offline' ? 'Offline' : (friend.statusMessage || statusLabel(friend.status))}</div>
-      </div>
+      <div class="chat-header-name">${escapeHtml(friend.username)}</div>
+      <div class="chat-header-divider"></div>
+      <div class="chat-header-status">${escapeHtml(friend.status === 'offline' ? 'Offline' : (friend.statusMessage || availabilityLabel(friend.status)))}</div>
     </div>
     <div class="chat-header-actions">
       <button class="icon-btn" id="chat-call-btn" title="Chamada de voz">${ICONS.phone}</button>
@@ -1327,15 +1632,15 @@ function renderGroupChatHeader(group) {
         <span>Em chamada · ${callMembers.length}</span>
       </div>`
     : `${group.members.length} membros`;
+  dom.chatInput.placeholder = `Conversar em ${group.name}`;
   dom.chatHeader.innerHTML = `
     <div class="chat-header-user">
       <div class="chat-header-avatar">
         <div class="avatar avatar-sm" style="${avatarStyle(groupLike)}">${avatarInner(groupLike)}</div>
       </div>
-      <div>
-        <div class="chat-header-name">${escapeHtml(group.name)}</div>
-        <div class="chat-header-status">${statusHtml}</div>
-      </div>
+      <div class="chat-header-name">${escapeHtml(group.name)}</div>
+      <div class="chat-header-divider"></div>
+      <div class="chat-header-status">${statusHtml}</div>
     </div>
     <div class="chat-header-actions">
       <button class="icon-btn" id="chat-group-call-btn" title="${inCallWithGroup ? 'Voltar para a chamada' : (callMembers.length > 0 ? 'Entrar na chamada' : 'Chamada de voz')}">${ICONS.phone}</button>
@@ -1406,78 +1711,89 @@ function requestGroupScreenShare(group) {
 }
 
 // ---------------- Messages ----------------
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
 function renderChatMessages() {
   const conv = state.conversations[state.selectedPeerId];
   const friend = currentFriend(state.selectedPeerId);
-  const messages = (conv && conv.messages) || [];
-  dom.chatMessages.innerHTML = messages.map((m) => {
-    const mine = m.from === state.currentUser.id;
-    if (mine) return outgoingMessageHtml(m);
-    return `
-      <div class="msg-row">
-        <div class="avatar msg-avatar" style="${avatarStyle(friend)}" ${friend ? `data-profile="${friend.id}"` : ''}>${friend ? avatarInner(friend) : ''}</div>
-        <div class="msg-body">
-          <div class="msg-meta"><span class="msg-author">${escapeHtml(friend ? friend.username : '')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
-          <div class="msg-text">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>
-        </div>
-      </div>`;
-  }).join('');
-  dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
-  wireMessageLinks();
-  wireProfileContextMenus(dom.chatMessages);
-  wireMessageActions(dom.chatMessages);
+  renderMessageList((conv && conv.messages) || [], () => friend);
 }
 
 function renderGroupChatMessages() {
   const group = currentGroup(state.selectedGroupId);
   const conv = state.groupConversations[state.selectedGroupId];
-  const messages = (conv && conv.messages) || [];
-  dom.chatMessages.innerHTML = messages.map((m) => {
+  renderMessageList((conv && conv.messages) || [], (m) => (group ? group.members.find((mem) => mem.id === m.from) : null));
+}
+
+// Shared by DMs and groups: day dividers, and consecutive messages from the
+// same person within a few minutes collapse under a single avatar/name.
+function renderMessageList(messages, authorOf) {
+  let html = '';
+  let prev = null;
+  messages.forEach((m) => {
+    const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
+    if (newDay) html += `<div class="day-divider">${dayLabel(m.createdAt)}</div>`;
+    const continued = !newDay && prev.from === m.from && m.createdAt - prev.createdAt < GROUP_WINDOW_MS;
     const mine = m.from === state.currentUser.id;
-    if (mine) return outgoingMessageHtml(m);
-    const sender = group ? group.members.find((mem) => mem.id === m.from) : null;
-    return `
-      <div class="msg-row">
-        <div class="avatar msg-avatar" style="${sender ? avatarStyle(sender) : ''}" ${sender ? `data-profile="${sender.id}"` : ''}>${sender ? avatarInner(sender) : ''}</div>
-        <div class="msg-body">
-          <div class="msg-meta"><span class="msg-author">${escapeHtml(sender ? sender.username : 'Alguém')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>
-          <div class="msg-text">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>
-        </div>
-      </div>`;
-  }).join('');
+    html += messageRowHtml(m, mine ? state.currentUser : authorOf(m), mine, continued);
+    prev = m;
+  });
+  dom.chatMessages.innerHTML = html;
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
   wireMessageLinks();
   wireProfileContextMenus(dom.chatMessages);
   wireMessageActions(dom.chatMessages);
 }
 
-function editedTagHtml(m) {
-  return m.editedAt ? ' <span class="msg-edited-tag">(editada)</span>' : '';
+function dayKey(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-// Shared by DM and group views: the outgoing bubble either shows its
-// normal read-only form, or — while state.editingMessageId matches — an
-// inline textarea in its place.
-function outgoingMessageHtml(m) {
-  if (state.editingMessageId === m.id) {
-    return `
-      <div class="msg-row msg-row-out" data-msg-id="${m.id}">
-        <div class="msg-edit-wrap">
-          <textarea class="msg-edit-input" rows="1">${escapeHtml(m.text)}</textarea>
-          <div class="msg-edit-hint">Enter para salvar · Esc para cancelar</div>
-        </div>
-      </div>`;
-  }
-  return `
-    <div class="msg-row msg-row-out" data-msg-id="${m.id}">
+function dayLabel(ts) {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (dayKey(ts) === dayKey(now)) return 'Hoje';
+  if (dayKey(ts) === dayKey(yesterday)) return 'Ontem';
+  const d = new Date(ts);
+  const opts = { day: 'numeric', month: 'long' };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString('pt-BR', opts);
+}
+
+// Your own messages carry the edit menu, or — while state.editingMessageId
+// matches — an inline textarea in place of the text.
+function messageRowHtml(m, author, mine, continued) {
+  const editing = mine && state.editingMessageId === m.id;
+  const lead = continued
+    ? `<div class="msg-gutter"><div class="msg-gutter-time">${formatTime(m.createdAt)}</div></div>`
+    : `<div class="avatar msg-avatar" style="${author ? avatarStyle(author) : ''}" ${author ? `data-profile="${author.id}"` : ''}>${author ? avatarInner(author) : ''}</div>`;
+  const meta = continued ? '' : `
+      <div class="msg-meta"><span class="msg-author">${escapeHtml(author ? author.username : 'Alguém')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>`;
+  const body = editing
+    ? `<div class="msg-edit-wrap">
+        <textarea class="msg-edit-input" rows="1">${escapeHtml(m.text)}</textarea>
+        <div class="msg-edit-hint">Enter para salvar · Esc para cancelar</div>
+      </div>`
+    : `<div class="msg-text">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>`;
+  const actions = mine && !editing ? `
       <div class="msg-actions">
         <button class="msg-actions-btn" title="Mais opções">${ICONS.moreVertical}</button>
         <div class="msg-actions-menu" hidden>
           <button class="msg-actions-item" data-action="edit">Editar mensagem</button>
         </div>
-      </div>
-      <div class="msg-bubble-out">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>
+      </div>` : '';
+  return `
+    <div class="msg-row ${mine ? 'msg-row-out' : ''} ${continued ? 'continued' : ''}" ${mine ? `data-msg-id="${m.id}"` : ''}>
+      ${lead}
+      <div class="msg-body">${meta}${body}</div>
+      ${actions}
     </div>`;
+}
+
+function editedTagHtml(m) {
+  return m.editedAt ? ' <span class="msg-edited-tag">(editada)</span>' : '';
 }
 
 function wireMessageActions(container) {
@@ -1723,7 +2039,7 @@ function renderCallBar(cm) {
   dom.callBarTitle.textContent = title;
   dom.callBarTimer.textContent = cm.state === 'connected' ? formatDuration(cm.elapsedSeconds()) : '';
   dom.callBarMic.innerHTML = cm.micMuted ? ICONS.micOff : ICONS.mic;
-  dom.callBarMic.classList.toggle('active', !cm.micMuted && cm.state === 'connected');
+  dom.callBarMic.classList.toggle('is-off', cm.micMuted);
   dom.callBarShare.innerHTML = ICONS.monitor;
   dom.callBarShare.classList.toggle('active', cm.sharingLocal);
   dom.callBarShare.style.display = cm.state === 'connected' ? '' : 'none';
@@ -1733,8 +2049,8 @@ function renderCallBar(cm) {
   const canEscalate = !isGroup && cm.state === 'connected';
   dom.callBarGroup.innerHTML = ICONS.group;
   dom.callBarGroup.style.display = canEscalate ? '' : 'none';
-  dom.callBarExpand.innerHTML = state.callViewExpanded ? ICONS.collapse : ICONS.expand;
-  dom.callBarExpand.onclick = () => { state.callViewExpanded = !state.callViewExpanded; renderChatMain(); };
+  dom.callBarExpand.innerHTML = ICONS.expand;
+  dom.callBarExpand.onclick = () => { state.callViewExpanded = true; renderChatMain(); };
   dom.callBarEnd.innerHTML = ICONS.phoneEnd;
 }
 
@@ -1771,8 +2087,8 @@ function switchFocusedShare(shareId) {
   renderChatMain();
 }
 
-// allTiles: every participant (sharing or not), used for the thumbnail
-// strip so non-sharers still show up there like before.
+// allTiles: every participant (sharing or not), used for the column of
+// tiles beside the stage so non-sharers still show up there.
 function renderScreenshareStage(shares, allTiles) {
   const focus = focusedShare(shares);
 
@@ -1786,15 +2102,20 @@ function renderScreenshareStage(shares, allTiles) {
     </div>` : '';
 
   const label = focus
-    ? (focus.isSelf ? 'Você está compartilhando sua tela' : `${escapeHtml(focus.user.username || '')} está compartilhando a tela`)
+    ? (focus.isSelf ? 'Você está compartilhando a tela' : `${escapeHtml(focus.user.username || '')} está compartilhando a tela`)
     : '';
 
   dom.callViewBody.innerHTML = `
     <div class="screenshare-panel">
-      ${switcherHtml}
-      <div class="screenshare-stage">
-        <div class="screenshare-label">${label}</div>
-        <video id="screenshare-video" autoplay playsinline></video>
+      <div class="screenshare-main">
+        <div class="screenshare-top">
+          <div class="screenshare-label">${ICONS.monitor}${label}</div>
+          ${switcherHtml}
+        </div>
+        <div class="screenshare-stage">
+          <video id="screenshare-video" autoplay playsinline></video>
+          ${focus ? `<div class="screenshare-owner">${escapeHtml(focus.isSelf ? 'Você' : (focus.user.username || ''))}</div>` : ''}
+        </div>
       </div>
       <div class="screenshare-strip">
         ${allTiles.map((t) => {
@@ -1802,8 +2123,8 @@ function renderScreenshareStage(shares, allTiles) {
           const isFocused = !!(focus && t.id === focus.id);
           return `
           <div class="screenshare-thumb ${isSharer ? 'is-sharer' : ''} ${isFocused ? 'is-focused' : ''}" data-speaking-key="${t.id}" ${isSharer ? `data-share-id="${t.id}"` : ''}>
-            <div class="avatar avatar-sm" style="${avatarStyle(t.user)}">${avatarInner(t.user)}${isSharer ? `<span class="screenshare-thumb-badge">${ICONS.monitor}</span>` : ''}</div>
-            <div class="screenshare-thumb-name">${escapeHtml(t.isSelf ? 'Você' : (t.user.username || ''))}</div>
+            <div class="avatar" style="${avatarStyle(t.user)}">${avatarInner(t.user)}${isSharer ? `<span class="screenshare-thumb-badge">${ICONS.monitor}</span>` : ''}</div>
+            <div class="screenshare-thumb-name">${tileNameHtml(t.user, t.isSelf, t.muted)}</div>
           </div>`;
         }).join('')}
       </div>
@@ -1822,7 +2143,7 @@ function renderScreenshareStage(shares, allTiles) {
     btn.addEventListener('click', () => switchFocusedShare(btn.dataset.shareId));
   });
 
-  // Right-click a thumbnail = that person's voice volume (skip yourself).
+  // Right-click a tile = that person's voice volume (skip yourself).
   allTiles.forEach((t) => {
     if (t.isSelf) return;
     const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(t.id)}"]`);
@@ -1836,68 +2157,108 @@ function renderScreenshareStage(shares, allTiles) {
   }
 }
 
+function tileNameHtml(user, isSelf, muted) {
+  const name = isSelf ? `${user.username || ''} (você)` : (user.username || '');
+  return `${escapeHtml(name)}${muted ? ICONS.micOff.replace(/width="18" height="18"/, 'width="15" height="15"') : ''}`;
+}
+
+function participantTileHtml(key, user, isSelf, muted, extra = '') {
+  return `
+    <div class="participant-tile" data-speaking-key="${key}">
+      <div class="avatar avatar-lg" style="${avatarStyle(user)}">${avatarInner(user)}</div>
+      <div class="participant-tile-name">${tileNameHtml(user, isSelf, muted)}</div>
+      ${extra}
+    </div>`;
+}
+
+function renderCallHeader(title, sub, connected, elapsed) {
+  dom.callViewHeader.innerHTML = `
+    <button class="call-view-back" id="cv-back" title="Voltar para a conversa">${ICONS.back}</button>
+    <div class="call-view-heading">
+      <div class="call-view-title">${escapeHtml(title)}</div>
+      <div class="call-view-sub">${escapeHtml(sub)}</div>
+    </div>
+    <div class="call-view-timer">${connected ? `<span class="live-dot"></span><span class="call-view-timer-text">${formatDuration(elapsed)}</span>` : ''}</div>`;
+  document.getElementById('cv-back').addEventListener('click', collapseCallToChat);
+}
+
+// Leaves the full-window stage and lands on the call's own conversation,
+// with the call continuing in the sidebar's minimized bar.
+function collapseCallToChat() {
+  state.callViewExpanded = false;
+  if (groupCallManager.state !== 'idle' && groupCallManager.groupId) {
+    openGroup(groupCallManager.groupId);
+  } else if (callManager.state !== 'idle' && callManager.peer && currentFriend(callManager.peer.id)) {
+    openDm(callManager.peer.id);
+  } else {
+    renderChatMain();
+  }
+}
+
+function callControlsHtml(cm, { canEscalate }) {
+  return `
+    <div class="call-controls-pill">
+      <button class="call-control-btn ${cm.micMuted ? 'is-off' : ''}" id="cv-mic" title="${cm.micMuted ? 'Ativar microfone' : 'Silenciar microfone'}">${cm.micMuted ? ICONS.micOff : ICONS.mic}</button>
+      <button class="call-control-btn ${cm.deafened ? 'is-off' : ''}" id="cv-deafen" title="${cm.deafened ? 'Voltar a ouvir' : 'Ensurdecer'}">${ICONS.headphones}</button>
+      <button class="call-control-btn ${cm.sharingLocal ? 'active' : ''}" id="cv-share" title="${cm.sharingLocal ? 'Parar transmissão' : 'Compartilhar tela'}">${ICONS.monitor}</button>
+      ${canEscalate ? `<button class="call-control-btn" id="cv-group" title="Adicionar pessoas (cria um grupo)">${ICONS.group}</button>` : ''}
+      <button class="call-control-btn" id="cv-chat" title="Abrir conversa">${ICONS.chatBubble}</button>
+      <div class="call-control-divider"></div>
+      <button class="call-control-btn call-control-end" id="cv-end" title="Sair da chamada">${ICONS.phoneEnd}<span>Sair</span></button>
+    </div>`;
+}
+
+function wireCallControls(cm, onEnd) {
+  document.getElementById('cv-mic').addEventListener('click', () => cm.toggleMic());
+  document.getElementById('cv-deafen').addEventListener('click', () => cm.toggleDeafen());
+  document.getElementById('cv-share').addEventListener('click', () => cm.toggleScreenShare());
+  const groupBtn = document.getElementById('cv-group');
+  if (groupBtn) groupBtn.addEventListener('click', () => openCreateGroupModal());
+  document.getElementById('cv-chat').addEventListener('click', collapseCallToChat);
+  document.getElementById('cv-end').addEventListener('click', onEnd);
+}
+
 function renderCallView() {
   const cm = callManager;
   const peer = cm.peer;
   if (!peer) return;
 
   const isSharing = cm.sharingLocal || cm.remoteSharing;
+  const connected = cm.state === 'connected';
+  renderCallHeader(
+    peer.username,
+    cm.state === 'calling' ? 'Chamando...' : `Chamada privada · 2 pessoas${isSharing ? ' · tela ao vivo' : ''}`,
+    connected,
+    connected ? cm.elapsedSeconds() : 0,
+  );
 
-  dom.callViewHeader.innerHTML = `
-    <div>
-      <div class="call-view-title">${isSharing ? 'Compartilhamento de tela' : 'Chamada de voz'} — ${escapeHtml(peer.username)}</div>
-      <div class="call-view-sub">${cm.state === 'calling' ? 'Chamando...' : '2 participantes'}</div>
-    </div>
-    <div class="call-view-timer">${cm.state === 'connected' ? formatDuration(cm.elapsedSeconds()) : ''}</div>`;
-
+  dom.callViewBody.classList.toggle('sharing', isSharing);
   if (isSharing) {
     const allTiles = [
-      { id: 'self', user: state.currentUser, isSelf: true },
-      { id: peer.id, user: peer, isSelf: false },
+      { id: 'self', user: state.currentUser, isSelf: true, muted: cm.micMuted },
+      { id: peer.id, user: peer, isSelf: false, muted: cm.remoteMicMuted },
     ];
     renderScreenshareStage(collectShares(cm), allTiles);
   } else {
-    dom.callViewBody.innerHTML = `
-      <div class="participant-tile" data-speaking-key="self">
-        <div class="avatar avatar-lg" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
-        <div class="participant-tile-name">Você</div>
-        <div class="participant-mic-badge ${cm.micMuted ? 'muted' : ''}">${cm.micMuted ? ICONS.micOff : ICONS.mic}</div>
-      </div>
-      <div class="participant-tile" data-speaking-key="${peer.id}">
-        <div class="avatar avatar-lg" style="${avatarStyle(peer)}">${avatarInner(peer)}</div>
-        <div class="participant-tile-name">${escapeHtml(peer.username)}</div>
-        ${cm.state === 'calling' ? '<div class="participant-tile-name" style="font-weight:500;color:var(--text-tertiary);font-size:12px;">Chamando...</div>' : ''}
-        ${cm.remoteMicMuted ? `<div class="participant-mic-badge muted">${ICONS.micOff}</div>` : ''}
-      </div>`;
+    dom.callViewBody.innerHTML = participantTileHtml('self', state.currentUser, true, cm.micMuted)
+      + participantTileHtml(peer.id, peer, false, cm.remoteMicMuted,
+        cm.state === 'calling' ? '<div class="participant-tile-calling">Chamando...</div>' : '');
 
     const peerTileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(peer.id)}"]`);
     if (peerTileEl) peerTileEl.addEventListener('contextmenu', (e) => openAvatarContextMenu(e, peer, 'voice'));
   }
 
-  const showControls = cm.state === 'calling' || cm.state === 'connected';
-  dom.callViewControls.innerHTML = showControls ? `
-    <div class="call-controls-pill">
-      ${cm.state === 'connected' ? `
-        <button class="call-control-btn ${!cm.micMuted ? '' : 'active'}" id="cv-mic" title="Mudo">${cm.micMuted ? ICONS.micOff : ICONS.mic}</button>
-        <button class="call-control-btn ${cm.deafened ? 'active' : ''}" id="cv-deafen" title="Ensurdecer">${ICONS.headphones}</button>
-        <button class="call-control-btn ${cm.sharingLocal ? 'active' : ''}" id="cv-share" title="Compartilhar tela">${ICONS.monitor}</button>
-        <button class="call-control-btn" id="cv-group" title="Adicionar ao grupo">${ICONS.group}</button>
-        <div class="call-control-divider"></div>
-      ` : ''}
-      <button class="call-control-btn call-control-end" id="cv-end" title="${cm.state === 'calling' ? 'Cancelar' : 'Encerrar'}">${ICONS.phoneEnd}</button>
-    </div>` : '';
-
-  if (showControls) {
-    if (cm.state === 'connected') {
-      document.getElementById('cv-mic').addEventListener('click', () => cm.toggleMic());
-      document.getElementById('cv-deafen').addEventListener('click', () => cm.toggleDeafen());
-      document.getElementById('cv-share').addEventListener('click', () => cm.toggleScreenShare());
-      document.getElementById('cv-group').addEventListener('click', () => openCreateGroupModal());
-    }
-    document.getElementById('cv-end').addEventListener('click', () => {
-      if (cm.state === 'calling') cm.cancelOutgoing();
-      else cm.endCall();
-    });
+  if (cm.state === 'calling') {
+    dom.callViewControls.innerHTML = `
+      <div class="call-controls-pill">
+        <button class="call-control-btn call-control-end" id="cv-end" title="Cancelar">${ICONS.phoneEnd}<span>Cancelar</span></button>
+      </div>`;
+    document.getElementById('cv-end').addEventListener('click', () => cm.cancelOutgoing());
+  } else if (connected) {
+    dom.callViewControls.innerHTML = callControlsHtml(cm, { canEscalate: true });
+    wireCallControls(cm, () => cm.endCall());
+  } else {
+    dom.callViewControls.innerHTML = '';
   }
 }
 
@@ -1906,34 +2267,25 @@ function renderGroupCallView() {
   if (!cm.group) return;
   const participants = cm.participantList();
   const isSharing = cm.sharingLocal || participants.some((p) => p.remoteSharing);
+  const count = participants.length + 1;
 
-  dom.callViewHeader.innerHTML = `
-    <div>
-      <div class="call-view-title">${isSharing ? 'Compartilhamento de tela' : 'Chamada em grupo'} — ${escapeHtml(cm.group.name)}</div>
-      <div class="call-view-sub">${participants.length + 1} participante${participants.length === 0 ? '' : 's'}</div>
-    </div>
-    <div class="call-view-timer">${formatDuration(cm.elapsedSeconds())}</div>`;
+  renderCallHeader(
+    cm.group.name,
+    `Grupo · ${count} ${count === 1 ? 'pessoa' : 'pessoas'}${count === 1 ? ' · esperando o pessoal' : ''}`,
+    cm.state === 'connected',
+    cm.elapsedSeconds(),
+  );
 
+  dom.callViewBody.classList.toggle('sharing', isSharing);
   if (isSharing) {
     const allTiles = [
-      { id: 'self', user: state.currentUser, isSelf: true },
-      ...participants.map((p) => ({ id: p.user.id, user: p.user, isSelf: false })),
+      { id: 'self', user: state.currentUser, isSelf: true, muted: cm.micMuted },
+      ...participants.map((p) => ({ id: p.user.id, user: p.user, isSelf: false, muted: p.micMuted })),
     ];
     renderScreenshareStage(collectShares(cm), allTiles);
   } else {
-    const selfTile = `
-      <div class="participant-tile" data-speaking-key="self">
-        <div class="avatar avatar-lg" style="${avatarStyle(state.currentUser)}">${avatarInner(state.currentUser)}</div>
-        <div class="participant-tile-name">Você</div>
-        <div class="participant-mic-badge ${cm.micMuted ? 'muted' : ''}">${cm.micMuted ? ICONS.micOff : ICONS.mic}</div>
-      </div>`;
-    const peerTiles = participants.map((p) => `
-      <div class="participant-tile" data-speaking-key="${p.user.id}">
-        <div class="avatar avatar-lg" style="${avatarStyle(p.user)}">${avatarInner(p.user)}</div>
-        <div class="participant-tile-name">${escapeHtml(p.user.username || '')}</div>
-        ${p.micMuted ? `<div class="participant-mic-badge muted">${ICONS.micOff}</div>` : ''}
-      </div>`).join('');
-    dom.callViewBody.innerHTML = selfTile + peerTiles;
+    dom.callViewBody.innerHTML = participantTileHtml('self', state.currentUser, true, cm.micMuted)
+      + participants.map((p) => participantTileHtml(p.user.id, p.user, false, p.micMuted)).join('');
 
     participants.forEach((p) => {
       const tileEl = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(p.user.id)}"]`);
@@ -1941,19 +2293,8 @@ function renderGroupCallView() {
     });
   }
 
-  dom.callViewControls.innerHTML = `
-    <div class="call-controls-pill">
-      <button class="call-control-btn ${!cm.micMuted ? '' : 'active'}" id="cv-mic" title="Mudo">${cm.micMuted ? ICONS.micOff : ICONS.mic}</button>
-      <button class="call-control-btn ${cm.deafened ? 'active' : ''}" id="cv-deafen" title="Ensurdecer">${ICONS.headphones}</button>
-      <button class="call-control-btn ${cm.sharingLocal ? 'active' : ''}" id="cv-share" title="Compartilhar tela">${ICONS.monitor}</button>
-      <div class="call-control-divider"></div>
-      <button class="call-control-btn call-control-end" id="cv-end" title="Sair da chamada">${ICONS.phoneEnd}</button>
-    </div>`;
-
-  document.getElementById('cv-mic').addEventListener('click', () => cm.toggleMic());
-  document.getElementById('cv-deafen').addEventListener('click', () => cm.toggleDeafen());
-  document.getElementById('cv-share').addEventListener('click', () => cm.toggleScreenShare());
-  document.getElementById('cv-end').addEventListener('click', () => cm.leaveCall());
+  dom.callViewControls.innerHTML = callControlsHtml(cm, { canEscalate: false });
+  wireCallControls(cm, () => cm.leaveCall());
 }
 
 function formatDuration(totalSeconds) {
@@ -1986,7 +2327,9 @@ function speakingLoop() {
 
 function setSpeakingClass(key, speaking) {
   const tile = dom.callViewBody.querySelector(`[data-speaking-key="${CSS.escape(String(key))}"]`);
-  const avatarEl = tile && tile.querySelector('.avatar');
+  if (!tile) return;
+  tile.classList.toggle('speaking', speaking);
+  const avatarEl = tile.querySelector('.avatar');
   if (avatarEl) avatarEl.classList.toggle('speaking', speaking);
 }
 
@@ -1995,7 +2338,7 @@ function tickTimers() {
   if (!cm || cm.state !== 'connected') return;
   if (!dom.callBar.hidden) dom.callBarTimer.textContent = formatDuration(cm.elapsedSeconds());
   if (!dom.callView.hidden) {
-    const timerEl = dom.callViewHeader.querySelector('.call-view-timer');
+    const timerEl = dom.callViewHeader.querySelector('.call-view-timer-text');
     if (timerEl) timerEl.textContent = formatDuration(cm.elapsedSeconds());
   }
 }

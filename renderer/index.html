@@ -4,16 +4,36 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' http://localhost:4732 ws://localhost:4732 https://*.onrender.com wss://*.onrender.com;">
 <title>Orbit</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
+  <!-- Shared logo: a planet with a tilted ring passing behind and in front of it. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="orbit-planet-grad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#B9A2FF"/>
+        <stop offset="1" stop-color="#6A2FE0"/>
+      </linearGradient>
+    </defs>
+    <symbol id="orbit-logo" viewBox="0 0 48 48">
+      <g transform="rotate(-24 24 24)">
+        <path d="M3 24a21 7 0 0 1 42 0" fill="none" stroke="#A78BFA" stroke-width="2.6" stroke-linecap="round" opacity=".55"/>
+        <circle cx="24" cy="24" r="11.5" fill="url(#orbit-planet-grad)"/>
+        <path d="M3 24a21 7 0 0 0 42 0" fill="none" stroke="#EDEBF5" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="43.4" cy="21" r="2.6" fill="#EDEBF5"/>
+      </g>
+    </symbol>
+  </svg>
+
   <!-- Onboarding: create account or log in -->
   <div id="onboarding-screen" class="onboarding">
+    <div class="onboarding-orbits" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="onboarding-card">
       <div class="brand">
-        <div class="brand-mark"></div>
+        <svg class="brand-logo" width="44" height="44"><use href="#orbit-logo"/></svg>
         <span>Orbit</span>
       </div>
 
@@ -30,7 +50,7 @@
         <label class="field-label" for="register-password-confirm">Confirmar senha</label>
         <input id="register-password-confirm" class="text-input" type="password" placeholder="Digite a senha novamente" autocomplete="new-password">
 
-        <button id="register-submit" class="btn btn-primary btn-block" style="margin-top:20px;" disabled>Criar conta</button>
+        <button id="register-submit" class="btn btn-primary btn-block" style="margin-top:22px;" disabled>Criar conta</button>
         <div id="register-error" class="onboarding-error" hidden></div>
 
         <div class="auth-switch">Já tem uma conta? <button id="show-login-btn" class="auth-switch-link" type="button">Entrar</button></div>
@@ -46,7 +66,7 @@
         <label class="field-label" for="login-password">Senha</label>
         <input id="login-password" class="text-input" type="password" placeholder="Sua senha" autocomplete="current-password">
 
-        <button id="login-submit" class="btn btn-primary btn-block" style="margin-top:20px;" disabled>Entrar</button>
+        <button id="login-submit" class="btn btn-primary btn-block" style="margin-top:22px;" disabled>Entrar</button>
         <div id="login-error" class="onboarding-error" hidden></div>
 
         <div class="auth-switch">Não tem uma conta? <button id="show-register-btn" class="auth-switch-link" type="button">Criar conta</button></div>
@@ -57,212 +77,262 @@
   <!-- Main app -->
   <div id="main-app" class="app-shell" hidden>
 
-    <nav class="nav-rail">
-      <div class="nav-indicator" id="nav-indicator"></div>
-      <button class="nav-btn active" data-tab="friends" title="Amigos">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-6 5.5-6s5.5 2.7 5.5 6"/><circle cx="17" cy="8.5" r="2.5"/><path d="M15.5 14.2c2.6.3 4.5 2.6 4.5 5.8"/></svg>
+    <!-- Rail: home + one orbit per group -->
+    <nav class="rail">
+      <button id="rail-home" class="rail-home active" title="Início">
+        <svg width="30" height="30"><use href="#orbit-logo"/></svg>
+        <span id="chat-unread-dot" class="rail-dot" hidden></span>
       </button>
-      <button class="nav-btn" data-tab="profile" title="Perfil">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3.2"/><path d="M6.5 18.5c1-2.4 3-3.7 5.5-3.7s4.5 1.3 5.5 3.7"/></svg>
-      </button>
-      <button class="nav-btn" data-tab="chat" title="Conversas">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5v8c0 1.4-1.1 2.5-2.5 2.5H10l-4.5 4v-4H6.5C5.1 17 4 15.9 4 14.5v-8Z"/></svg>
-        <span id="chat-unread-dot" class="unread-dot" hidden></span>
-      </button>
-      <button id="logout-btn" class="nav-btn nav-btn-logout" title="Sair da conta">
-        <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20H9"/><path d="M16 16l4-4-4-4"/><path d="M20 12H9"/></svg>
+      <div class="rail-sep"></div>
+      <div id="rail-groups" class="rail-groups"></div>
+      <button id="dm-new-group-btn" class="rail-add" title="Criar grupo">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </nav>
 
-    <!-- Amigos -->
-    <section class="tab-panel" id="tab-friends">
-      <div class="panel-content">
-        <div class="panel-header">
-          <h1>Amigos</h1>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div id="sidebar-home" class="sidebar-section">
+        <div class="sidebar-top">
+          <label class="search-field">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+            <input id="dm-search" type="text" placeholder="Buscar conversa" autocomplete="off" spellcheck="false">
+          </label>
         </div>
-
-        <div class="add-friend-row">
-          <input id="add-friend-input" class="text-input" type="text" placeholder="usuario#0000">
-          <button id="add-friend-btn" class="btn btn-primary">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-            Adicionar amigo
+        <div class="sidebar-scroll">
+          <button id="sidebar-friends-btn" class="side-item side-item-lg active">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-6 5.5-6s5.5 2.7 5.5 6"/><circle cx="17" cy="8.5" r="2.5"/><path d="M15.5 14.2c2.6.3 4.5 2.6 4.5 5.8"/></svg>
+            <span>Amigos</span>
+            <span id="friends-pending-badge" class="count-badge" hidden></span>
           </button>
-        </div>
-        <div id="add-friend-feedback" class="add-friend-feedback" hidden></div>
-
-        <div id="pending-section" class="list-section" hidden>
-          <div class="section-label">Pedidos pendentes</div>
-          <div id="pending-list"></div>
-        </div>
-
-        <div id="outgoing-section" class="list-section" hidden>
-          <div class="section-label">Enviados</div>
-          <div id="outgoing-list"></div>
-        </div>
-
-        <div class="list-section">
-          <div class="section-label" id="online-label">Online — 0</div>
-          <div id="online-list"></div>
-        </div>
-
-        <div class="list-section">
-          <div class="section-label" id="offline-label">Offline — 0</div>
-          <div id="offline-list"></div>
-        </div>
-
-        <div id="friends-empty-state" class="empty-state" hidden>
-          <p>Você ainda não tem amigos por aqui.</p>
-          <p class="empty-state-sub">Adicione alguém usando o campo acima com o nome e a tag, como <strong>usuario#0001</strong>.</p>
+          <div class="side-label">Mensagens diretas</div>
+          <div id="dm-list-items"></div>
+          <div id="dm-list-empty" class="side-empty" hidden>Adicione amigos para começar a conversar.</div>
         </div>
       </div>
-    </section>
 
-    <!-- Perfil -->
-    <section class="tab-panel" id="tab-profile" hidden>
-      <div class="panel-content panel-content-center">
-        <div class="profile-card-wrap">
-          <h1>Perfil</h1>
-          <div class="profile-card">
-            <div id="profile-banner" class="profile-banner">
-              <button id="profile-banner-edit" class="banner-edit-badge" title="Alterar banner">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5c0-1 .8-1.8 1.8-1.8h1.4l1-1.5h7.6l1 1.5h1.4c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8H5.8C4.8 19.3 4 18.5 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.2"/></svg>
-                <span>Alterar banner</span>
-              </button>
+      <div id="sidebar-group" class="sidebar-section" hidden>
+        <button id="sidebar-group-header" class="sidebar-group-header" title="Configurações do grupo">
+          <span id="sidebar-group-name"></span>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div id="sidebar-group-body" class="sidebar-scroll"></div>
+      </div>
+
+      <!-- Minimized call: shown while you browse the app during a call -->
+      <div id="call-bar" class="call-bar" hidden>
+        <div class="call-bar-info">
+          <span class="call-bar-status"><span class="live-dot"></span>Em chamada</span>
+          <span id="call-bar-title" class="call-bar-title">Chamada</span>
+          <span id="call-bar-timer" class="call-bar-timer"></span>
+        </div>
+        <div class="call-bar-actions">
+          <button id="call-bar-mic" class="call-icon-btn" title="Mudo"></button>
+          <button id="call-bar-share" class="call-icon-btn" title="Compartilhar tela"></button>
+          <button id="call-bar-group" class="call-icon-btn" title="Adicionar ao grupo"></button>
+          <button id="call-bar-expand" class="call-icon-btn" title="Abrir chamada"></button>
+          <button id="call-bar-end" class="call-icon-btn call-icon-btn-danger" title="Encerrar"></button>
+        </div>
+      </div>
+
+      <div class="user-panel">
+        <button id="user-panel-me" class="user-panel-me" title="Editar perfil">
+          <span class="user-panel-avatar">
+            <span id="user-panel-avatar" class="avatar avatar-sm"></span>
+            <span id="user-panel-dot" class="status-dot"></span>
+          </span>
+          <span class="user-panel-text">
+            <span id="user-panel-name" class="user-panel-name"></span>
+            <span id="user-panel-status" class="user-panel-status"></span>
+          </span>
+        </button>
+        <button id="user-panel-mic" class="icon-btn" title="Mudo (só durante chamadas)"></button>
+        <button id="user-panel-deafen" class="icon-btn" title="Ensurdecer (só durante chamadas)"></button>
+        <button id="user-panel-settings" class="icon-btn" title="Perfil e configurações"></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Amigos -->
+      <section class="tab-panel" id="tab-friends">
+        <header class="main-header">
+          <h1 class="main-title">Amigos</h1>
+          <div id="friends-filter" class="segmented">
+            <button data-filter="online" class="active">Online</button>
+            <button data-filter="all">Todos</button>
+            <button data-filter="pending">Pendentes<span id="pending-count" class="count-badge" hidden></span></button>
+          </div>
+          <div class="main-header-spacer"></div>
+          <button id="toggle-add-friend" class="btn btn-primary">Adicionar amigo</button>
+        </header>
+
+        <div class="main-scroll">
+          <div id="add-friend-panel" class="add-friend-panel" hidden>
+            <div class="add-friend-title">Adicionar amigo</div>
+            <div class="add-friend-desc">Digite o nome e a tag de quem você quer adicionar, como <strong>usuario#0001</strong>.</div>
+            <div class="add-friend-row">
+              <input id="add-friend-input" class="text-input" type="text" placeholder="usuario#0000" autocomplete="off" spellcheck="false">
+              <button id="add-friend-btn" class="btn btn-primary">Enviar pedido</button>
             </div>
-            <div class="profile-body">
-              <div class="profile-avatar-wrap">
-                <div id="profile-avatar" class="avatar avatar-xl avatar-ring"></div>
-                <button id="profile-avatar-edit" class="avatar-edit-badge" title="Alterar foto (aceita GIF)">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5c0-1 .8-1.8 1.8-1.8h1.4l1-1.5h7.6l1 1.5h1.4c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8H5.8C4.8 19.3 4 18.5 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.2"/></svg>
+            <div id="add-friend-feedback" class="add-friend-feedback" hidden></div>
+          </div>
+
+          <div id="pending-section" class="list-section" hidden>
+            <div class="section-label">Recebidos</div>
+            <div id="pending-list" class="card-list"></div>
+          </div>
+
+          <div id="outgoing-section" class="list-section" hidden>
+            <div class="section-label">Enviados</div>
+            <div id="outgoing-list" class="card-list"></div>
+          </div>
+
+          <div id="online-section" class="list-section">
+            <div class="section-label" id="online-label">Online — 0</div>
+            <div id="online-list" class="card-list"></div>
+          </div>
+
+          <div id="offline-section" class="list-section">
+            <div class="section-label" id="offline-label">Offline — 0</div>
+            <div id="offline-list" class="card-list"></div>
+          </div>
+
+          <div id="friends-empty-state" class="empty-state" hidden>
+            <svg class="empty-state-logo" width="64" height="64"><use href="#orbit-logo"/></svg>
+            <p id="friends-empty-title">Você ainda não tem amigos por aqui.</p>
+            <p id="friends-empty-sub" class="empty-state-sub">Clique em <strong>Adicionar amigo</strong> e use o nome e a tag, como <strong>usuario#0001</strong>.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Perfil -->
+      <section class="tab-panel" id="tab-profile" hidden>
+        <header class="main-header">
+          <h1 class="main-title">Perfil</h1>
+          <div class="main-header-spacer"></div>
+          <button id="logout-btn" class="btn btn-outline btn-danger-text" title="Sair da conta">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20H9"/><path d="M16 16l4-4-4-4"/><path d="M20 12H9"/></svg>
+            Sair da conta
+          </button>
+        </header>
+        <div class="main-scroll">
+          <div class="profile-card-wrap">
+            <div class="profile-card">
+              <div id="profile-banner" class="profile-banner">
+                <button id="profile-banner-edit" class="banner-edit-badge" title="Alterar banner">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5c0-1 .8-1.8 1.8-1.8h1.4l1-1.5h7.6l1 1.5h1.4c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8H5.8C4.8 19.3 4 18.5 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.2"/></svg>
+                  <span>Alterar banner</span>
                 </button>
               </div>
-
-              <input id="profile-name-input" class="profile-name-input" maxlength="24" placeholder="Nome de exibição">
-              <div class="profile-tag-row">
-                <span>#</span>
-                <input id="profile-tag-input" class="profile-tag-input" maxlength="4" inputmode="numeric" placeholder="0000">
-              </div>
-
-              <div class="section-label" style="margin-top:22px;">Status</div>
-              <div class="status-options" id="status-options">
-                <div class="status-option" data-status="online">
-                  <span class="status-radio"></span>
-                  <span class="status-dot status-online"></span>
-                  <span class="status-option-text"><span class="status-option-title">Online</span><span class="status-option-sub">Disponível para conversar</span></span>
+              <div class="profile-body">
+                <div class="profile-avatar-wrap">
+                  <div id="profile-avatar" class="avatar avatar-xl avatar-ring"></div>
+                  <button id="profile-avatar-edit" class="avatar-edit-badge" title="Alterar foto (aceita GIF)">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5c0-1 .8-1.8 1.8-1.8h1.4l1-1.5h7.6l1 1.5h1.4c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8H5.8C4.8 19.3 4 18.5 4 17.5v-9Z"/><circle cx="12" cy="13" r="3.2"/></svg>
+                  </button>
                 </div>
-                <div class="status-option" data-status="away">
-                  <span class="status-radio"></span>
-                  <span class="status-dot status-away"></span>
-                  <span class="status-option-text"><span class="status-option-title">Ausente</span><span class="status-option-sub">Longe do teclado</span></span>
-                </div>
-                <div class="status-option" data-status="dnd">
-                  <span class="status-radio"></span>
-                  <span class="status-dot status-dnd"></span>
-                  <span class="status-option-text"><span class="status-option-title">Não perturbe</span><span class="status-option-sub">Sem notificações de chamada</span></span>
-                </div>
-                <div class="status-option" data-status="invisible">
-                  <span class="status-radio"></span>
-                  <span class="status-dot status-offline"></span>
-                  <span class="status-option-text"><span class="status-option-title">Invisível</span><span class="status-option-sub">Aparece como offline para outros</span></span>
-                </div>
-              </div>
 
-              <div class="section-label" style="margin-top:22px;">Mensagem de status</div>
-              <textarea id="profile-bio-input" class="bio-textarea" maxlength="140" placeholder="Compartilhe o que você está fazendo..."></textarea>
+                <input id="profile-name-input" class="profile-name-input" maxlength="24" placeholder="Nome de exibição">
+                <div class="profile-tag-row">
+                  <span>#</span>
+                  <input id="profile-tag-input" class="profile-tag-input" maxlength="4" inputmode="numeric" placeholder="0000">
+                </div>
 
-              <div class="section-label" style="margin-top:22px;">Cor de fundo do perfil</div>
-              <div class="profile-color-picker">
-                <canvas id="profile-color-wheel" class="color-wheel-canvas" width="140" height="140"></canvas>
-                <div class="profile-color-controls">
-                  <label class="field-label" for="profile-color-brightness" style="margin-bottom:8px;">Brilho</label>
-                  <input id="profile-color-brightness" type="range" min="20" max="100" value="100" class="color-brightness-slider">
-
-                  <label class="field-label" for="profile-color-hex" style="margin-top:16px; margin-bottom:8px;">Código hexadecimal</label>
-                  <div class="profile-color-hex-row">
-                    <span class="profile-color-hex-prefix">#</span>
-                    <input id="profile-color-hex" class="profile-color-hex-input" type="text" maxlength="6" placeholder="7b6ef6" autocomplete="off" spellcheck="false">
+                <div class="section-label" style="margin-top:26px;">Status</div>
+                <div class="status-options" id="status-options">
+                  <div class="status-option" data-status="online">
+                    <span class="status-dot status-online"></span>
+                    <span class="status-option-text"><span class="status-option-title">Disponível</span><span class="status-option-sub">Pronto pra conversar</span></span>
                   </div>
-
-                  <div class="profile-color-preview-row">
-                    <div id="profile-color-swatch" class="profile-color-swatch"></div>
-                    <button id="profile-color-reset" class="btn btn-ghost" type="button">Restaurar padrão</button>
+                  <div class="status-option" data-status="away">
+                    <span class="status-dot status-away"></span>
+                    <span class="status-option-text"><span class="status-option-title">Ausente</span><span class="status-option-sub">Longe do teclado</span></span>
+                  </div>
+                  <div class="status-option" data-status="dnd">
+                    <span class="status-dot status-dnd"></span>
+                    <span class="status-option-text"><span class="status-option-title">Não perturbe</span><span class="status-option-sub">Sem notificações de chamada</span></span>
+                  </div>
+                  <div class="status-option" data-status="invisible">
+                    <span class="status-dot status-offline"></span>
+                    <span class="status-option-text"><span class="status-option-title">Invisível</span><span class="status-option-sub">Aparece offline para todos</span></span>
                   </div>
                 </div>
-              </div>
 
-              <div class="profile-actions">
-                <span id="profile-save-hint" class="profile-save-hint"></span>
-                <button id="profile-save-btn" class="btn btn-primary">Salvar alterações</button>
+                <div class="section-label" style="margin-top:26px;">Mensagem de status</div>
+                <textarea id="profile-bio-input" class="bio-textarea" maxlength="140" placeholder="Compartilhe o que você está fazendo..."></textarea>
+
+                <div class="section-label" style="margin-top:26px;">Cor de fundo do perfil</div>
+                <div class="profile-color-picker">
+                  <canvas id="profile-color-wheel" class="color-wheel-canvas" width="140" height="140"></canvas>
+                  <div class="profile-color-controls">
+                    <label class="field-label" for="profile-color-brightness">Brilho</label>
+                    <input id="profile-color-brightness" type="range" min="20" max="100" value="100" class="color-brightness-slider">
+
+                    <label class="field-label" for="profile-color-hex" style="margin-top:16px;">Código hexadecimal</label>
+                    <div class="profile-color-hex-row">
+                      <span class="profile-color-hex-prefix">#</span>
+                      <input id="profile-color-hex" class="profile-color-hex-input" type="text" maxlength="6" placeholder="7C3AED" autocomplete="off" spellcheck="false">
+                    </div>
+
+                    <div class="profile-color-preview-row">
+                      <div id="profile-color-swatch" class="profile-color-swatch"></div>
+                      <button id="profile-color-reset" class="btn btn-secondary" type="button">Restaurar padrão</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="profile-actions">
+                  <span id="profile-save-hint" class="profile-save-hint"></span>
+                  <button id="profile-save-btn" class="btn btn-primary">Salvar alterações</button>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Conversas -->
-    <section class="tab-panel" id="tab-chat" hidden>
-      <div class="dm-list">
-        <div class="dm-list-header">
-          <div class="dm-list-title">Conversas</div>
-          <button id="dm-new-group-btn" class="icon-btn" title="Criar grupo">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8" r="2.8"/><path d="M3 19c0-2.8 2.5-5 5.5-5s5.5 2.2 5.5 5"/><circle cx="16.5" cy="8.5" r="2.2"/><path d="M15 14.3c2.3.3 4 2.2 4 4.7"/></svg>
-          </button>
-        </div>
-        <div id="dm-list-items"></div>
-        <div id="dm-list-empty" class="empty-state" hidden>
-          <p class="empty-state-sub">Adicione amigos na aba Amigos para começar a conversar.</p>
-        </div>
-      </div>
-
-      <div class="chat-main" id="chat-main">
-
-        <div id="call-bar" class="call-bar" hidden>
-          <div class="call-bar-info">
-            <span id="call-bar-title">Chamada</span>
-            <span id="call-bar-timer" class="call-bar-timer"></span>
+      <!-- Conversas -->
+      <section class="tab-panel" id="tab-chat" hidden>
+        <div class="chat-main" id="chat-main">
+          <div id="chat-empty" class="chat-empty">
+            <svg class="empty-state-logo" width="64" height="64"><use href="#orbit-logo"/></svg>
+            <p>Escolha uma conversa para começar</p>
           </div>
-          <div class="call-bar-actions">
-            <button id="call-bar-mic" class="call-icon-btn" title="Mudo"></button>
-            <button id="call-bar-share" class="call-icon-btn" title="Compartilhar tela"></button>
-            <button id="call-bar-group" class="call-icon-btn" title="Adicionar ao grupo"></button>
-            <button id="call-bar-expand" class="call-icon-btn" title="Expandir"></button>
-            <button id="call-bar-end" class="call-icon-btn call-icon-btn-danger" title="Encerrar"></button>
-          </div>
-        </div>
 
-        <div id="chat-empty" class="chat-empty">
-          <p>Selecione uma conversa para começar</p>
-        </div>
-
-        <div id="chat-text-view" class="chat-text-view" hidden>
-          <div class="chat-header" id="chat-header"></div>
-          <div class="chat-messages" id="chat-messages"></div>
-          <div class="chat-input-row">
-            <div class="emoji-picker-wrap">
-              <button id="emoji-picker-btn" class="icon-btn" type="button" title="Emojis">
-                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.2 2 3.5 2 3.5-2 3.5-2"/><path d="M9 9.5h.01M15 9.5h.01"/></svg>
-              </button>
-              <div id="emoji-picker-panel" class="emoji-picker-panel" hidden>
-                <div id="emoji-picker-tabs" class="emoji-picker-tabs"></div>
-                <div id="emoji-picker-grid" class="emoji-picker-grid"></div>
+          <div id="chat-text-view" class="chat-text-view" hidden>
+            <div class="chat-header" id="chat-header"></div>
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-composer">
+              <div class="chat-input-row">
+                <textarea id="chat-input" class="chat-input" rows="1" placeholder="Mensagem"></textarea>
+                <div class="emoji-picker-wrap">
+                  <button id="emoji-picker-btn" class="icon-btn" type="button" title="Emojis">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.2 2 3.5 2 3.5-2 3.5-2"/><path d="M9 9.5h.01M15 9.5h.01"/></svg>
+                  </button>
+                  <div id="emoji-picker-panel" class="emoji-picker-panel" hidden>
+                    <div id="emoji-picker-tabs" class="emoji-picker-tabs"></div>
+                    <div id="emoji-picker-grid" class="emoji-picker-grid"></div>
+                  </div>
+                </div>
+                <button id="chat-send-btn" class="send-btn" title="Enviar">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-6.5 16-2.7-6.8L4 12Z"/></svg>
+                </button>
               </div>
             </div>
-            <textarea id="chat-input" class="chat-input" rows="1" placeholder="Mensagem"></textarea>
-            <button id="chat-send-btn" class="send-btn">
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-6.5 16-2.7-6.8L4 12Z"/></svg>
-            </button>
           </div>
         </div>
+      </section>
+    </main>
 
-        <div id="call-view" class="call-view" hidden>
-          <div class="call-view-header" id="call-view-header"></div>
-          <div class="call-view-body" id="call-view-body"></div>
-          <div class="call-view-controls" id="call-view-controls"></div>
-        </div>
+    <!-- Right column: "Ativo agora", friend's profile, or group members -->
+    <aside id="aside-panel" class="aside"></aside>
 
-      </div>
-    </section>
+    <!-- Full-window call stage -->
+    <div id="call-view" class="call-view" hidden>
+      <div class="call-view-header" id="call-view-header"></div>
+      <div class="call-view-body" id="call-view-body"></div>
+      <div class="call-view-controls" id="call-view-controls"></div>
+    </div>
   </div>
 
   <!-- Incoming call -->
