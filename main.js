@@ -169,6 +169,7 @@ function createWindow() {
     backgroundColor: '#0b0a10',
     autoHideMenuBar: true,
     title: 'Orbit',
+    icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

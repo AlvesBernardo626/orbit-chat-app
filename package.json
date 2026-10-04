@@ -1,7 +1,7 @@
 {
   "name": "orbit-chat",
   "productName": "Orbit",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "App de desktop para conversas, chamadas de voz e compartilhamento de tela",
   "main": "main.js",
   "scripts": {
@@ -37,12 +37,14 @@
       "server/**/*",
       "shared/**/*",
       "renderer/**/*",
+      "build/icon.png",
       "!data/**/*"
     ],
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,

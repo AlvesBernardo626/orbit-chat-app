@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f1d2a"/>
+      <stop offset="1" stop-color="#0b0a10"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.55" r="0.5">
+      <stop offset="0" stop-color="#7c3aed" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="planet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c4b2ff"/>
+      <stop offset="0.55" stop-color="#8b4ff5"/>
+      <stop offset="1" stop-color="#5b21b6"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#glow)"/>
+  <rect x="17.5" y="17.5" width="477" height="477" rx="110.5" fill="none" stroke="#2a2837" stroke-width="3"/>
+  <g transform="rotate(-24 256 256)">
+    <path d="M58 256a198 66 0 0 1 396 0" fill="none" stroke="#a78bfa" stroke-width="22" stroke-linecap="round" opacity=".5"/>
+    <circle cx="256" cy="256" r="112" fill="url(#planet)"/>
+    <path d="M58 256a198 66 0 0 0 396 0" fill="none" stroke="#edebf5" stroke-width="22" stroke-linecap="round"/>
+    <circle cx="438" cy="226" r="24" fill="#edebf5"/>
+  </g>
+</svg>
