@@ -11,3 +11,7 @@ services:
         value: 20.18.0
       - key: MONGODB_URI
         sync: false
+      - key: CF_TURN_KEY_ID
+        sync: false
+      - key: CF_TURN_API_TOKEN
+        sync: false

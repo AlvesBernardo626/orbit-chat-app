@@ -2,10 +2,10 @@ import { emit, on } from './api.js';
 import { toast } from './ui.js';
 import { SpeakingTracker } from './audioLevel.js';
 import { getStoredVolume } from './volume.js';
+import { getIceServers } from './iceServers.js';
 
 function clampVolume(v) { return Math.min(1, Math.max(0, v)); }
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 class CallManager {
   constructor() {
@@ -305,7 +305,7 @@ class CallManager {
 
   _ensurePeerConnection() {
     if (this.pc) return;
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
     pc.onicecandidate = (event) => {
       if (event.candidate && this.peer) {
         emit('call:ice-candidate', { to: this.peer.id, candidate: event.candidate }).catch(() => {});

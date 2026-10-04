@@ -2,8 +2,8 @@ import { emit, on } from './api.js';
 import { toast } from './ui.js';
 import { SpeakingTracker } from './audioLevel.js';
 import { getStoredVolume } from './volume.js';
+import { getIceServers } from './iceServers.js';
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 function clampVolume(v) { return Math.min(1, Math.max(0, v)); }
 
 class GroupCallManager {
@@ -319,7 +319,7 @@ class GroupCallManager {
       entry.user = { ...entry.user, ...user };
       return entry;
     }
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
     entry = { pc, user, iceQueue: [], remoteAudioStream: null, remoteScreenStream: null, remoteSharing: false, micMuted: false, screenSender: null, screenAudioSender: null, audioEl: null, speakingTracker: null };
     pc.onicecandidate = (event) => {
       if (event.candidate) {

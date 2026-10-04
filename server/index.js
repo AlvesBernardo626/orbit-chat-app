@@ -2,6 +2,7 @@ const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
 const { createDb } = require('./db');
+const { getIceServers } = require('./turn');
 const { PORT, STATUSES } = require('../shared/constants');
 
 const VALID_STATUSES = STATUSES;
@@ -124,9 +125,10 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
         db.listPendingOutgoing(user.id),
       ]);
 
-      await broadcastPresence(user);
+      const [, iceServers] = await Promise.all([broadcastPresence(user), getIceServers()]);
 
       return {
+        iceServers,
         user: selfUser(user),
         friends: friendRows.map(publicUser),
         incoming: incomingRows.map(publicUser),
@@ -154,6 +156,11 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       const user = await db.getUserById(id);
       if (!user) return ack && ack({ error: 'not_found' });
       ack && ack(await joinSession(user));
+    });
+
+    socket.on('ice:config', async (_payload, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      ack && ack({ iceServers: await getIceServers() });
     });
 
     socket.on('profile:update', async (patch, ack) => {

@@ -32,3 +32,16 @@ Isso só funciona para quem instalou pelo instalador (não existe mais o modo po
 ## Atualizando o servidor depois
 
 Se você alterar código em `server/` ou `shared/`, dê push pro GitHub — o Render redesploya sozinho a cada push na branch conectada. Não precisa gerar um novo instalador a não ser que tenha mudado algo do lado do cliente (`main.js`, `preload.js`, `renderer/`).
+
+## Servidor TURN (chamadas em qualquer rede)
+
+Sem TURN, a chamada depende de conexão P2P direta, que falha em várias redes (4G, roteadores com CGNAT, redes corporativas). O servidor entrega a lista de ICE servers ao cliente no login (`server/turn.js`), então as credenciais nunca vão dentro do instalador.
+
+Configuração recomendada — **Cloudflare Realtime TURN** (grátis até 1 TB/mês):
+
+1. Em [dash.cloudflare.com](https://dash.cloudflare.com) → **Realtime** → **TURN Server** → **Create**.
+2. Copie o **Turn Token ID** e o **API Token**.
+3. No Render, em *orbit-signaling → Environment*, defina `CF_TURN_KEY_ID` e `CF_TURN_API_TOKEN`.
+4. No log do deploy deve aparecer `TURN: cloudflare`.
+
+Alternativa: qualquer TURN próprio (ex: coturn) via `TURN_URLS` (separadas por vírgula), `TURN_USERNAME` e `TURN_CREDENTIAL`. Sem nenhuma dessas variáveis, o log mostra `TURN: stun-only`.

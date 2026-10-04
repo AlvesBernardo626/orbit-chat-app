@@ -1,6 +1,7 @@
 import { emit, on, socket } from './api.js';
 import { callManager } from './call.js';
 import { groupCallManager } from './groupCall.js';
+import { startIceRefresh } from './iceServers.js';
 import { getStoredVolume, setStoredVolume, getStoredShareVolume, setStoredShareVolume } from './volume.js';
 import {
   escapeHtml, linkifyHtml, initials, avatarStyle, bannerStyle, statusLabel, statusDotClass,
@@ -365,6 +366,7 @@ async function logout() {
 
 // ---------------- Login ----------------
 async function onLoggedIn(res) {
+  startIceRefresh(res.iceServers);
   state.currentUser = res.user;
   state.friends = res.friends;
   state.incoming = res.incoming;
