@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('orbit', {
   },
   update: {
     onStatus: (callback) => ipcRenderer.on('update:status', (_event, payload) => callback(payload)),
+    install: () => ipcRenderer.invoke('update:install'),
   },
   screenShare: {
     onPickRequest: (callback) => {

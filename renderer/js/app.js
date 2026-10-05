@@ -148,6 +148,9 @@ const dom = {
   composerAttachments: document.getElementById('composer-attachments'),
   mentionPopup: document.getElementById('mention-popup'),
   dropOverlay: document.getElementById('drop-overlay'),
+  updateBanner: document.getElementById('update-banner'),
+  updateBannerVersion: document.getElementById('update-banner-version'),
+  updateBannerBtn: document.getElementById('update-banner-btn'),
   lightbox: document.getElementById('lightbox'),
   lightboxTitle: document.getElementById('lightbox-title'),
   lightboxBody: document.getElementById('lightbox-body'),
@@ -255,9 +258,12 @@ const ICONS = {
 // ---------------- Boot ----------------
 window.orbit.screenShare.onPickRequest((sources) => showScreenSharePicker(sources));
 window.orbit.hotkey.onToggleMute(() => activeCallManager()?.toggleMic());
-window.orbit.update.onStatus(({ state }) => {
+window.orbit.update.onStatus(({ state, version }) => {
   if (state === 'available') toast('Baixando atualização em segundo plano...');
-  if (state === 'ready') toast('Atualização pronta — reinicie o Orbit para aplicar.', 'ok');
+  if (state === 'ready') {
+    dom.updateBannerVersion.textContent = version ? `Versão ${version}` : 'Nova versão';
+    dom.updateBanner.hidden = false;
+  }
 });
 
 boot();
@@ -615,6 +621,12 @@ async function pickImageOrToast(kind) {
 }
 
 function wireStaticHandlers() {
+  dom.updateBannerBtn.addEventListener('click', () => {
+    dom.updateBannerBtn.disabled = true;
+    dom.updateBannerBtn.textContent = 'Reiniciando...';
+    window.orbit.update.install();
+  });
+
   // Navigation: rail, sidebar, user panel
   dom.railHome.addEventListener('click', () => switchTab('friends'));
   dom.sidebarFriendsBtn.addEventListener('click', () => switchTab('friends'));

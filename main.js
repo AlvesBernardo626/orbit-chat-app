@@ -185,16 +185,55 @@ function setupDisplayMediaHandler() {
 // running the installed (non-portable) build never need a new .exe sent to
 // them by hand again. Only makes sense for a packaged build: `npm start`
 // during development has no installed location to update in place.
+// Updates install silently and then relaunch the app by themselves. Letting
+// electron-updater install on quit without relaunching left a window of
+// ~40s where the install folder was empty or half-copied; opening Orbit in
+// that window crashed it, locked its files and the install never finished.
+let updateReady = false;
+let installingUpdate = false;
+
+function installUpdateAndRestart() {
+  if (!updateReady || installingUpdate) return;
+  installingUpdate = true;
+  // isSilent: no installer wizard; isForceRunAfter: reopen Orbit when done.
+  setImmediate(() => autoUpdater.quitAndInstall(true, true));
+}
+
+ipcMain.handle('update:install', () => installUpdateAndRestart());
+
+// Closing the app with an update waiting installs it and reopens Orbit,
+// instead of quietly updating in the background with no app to come back to.
+app.on('before-quit', (event) => {
+  if (updateReady && !installingUpdate) {
+    event.preventDefault();
+    installUpdateAndRestart();
+  }
+});
+
+function updaterLogger() {
+  const file = path.join(app.getPath('userData'), 'updater.log');
+  const write = (level) => (...args) => {
+    const line = `[${new Date().toISOString()}] ${level} ${args.map(String).join(' ')}
+`;
+    fs.appendFile(file, line, () => {});
+  };
+  return { info: write('INFO'), warn: write('WARN'), error: write('ERROR'), debug: () => {} };
+}
+
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
+  autoUpdater.logger = updaterLogger();
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
 
-  const notify = (state) => {
-    if (mainWindow) mainWindow.webContents.send('update:status', { state });
+  const notify = (state, extra = {}) => {
+    if (mainWindow) mainWindow.webContents.send('update:status', { state, ...extra });
   };
-  autoUpdater.on('update-available', () => notify('available'));
-  autoUpdater.on('update-downloaded', () => notify('ready'));
+  autoUpdater.on('update-available', (info) => notify('available', { version: info.version }));
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = true;
+    notify('ready', { version: info.version });
+  });
   autoUpdater.on('error', (err) => console.error('[orbit] erro ao verificar atualização:', err));
 
   autoUpdater.checkForUpdates().catch(() => { /* offline or no releases yet — silently skip */ });
