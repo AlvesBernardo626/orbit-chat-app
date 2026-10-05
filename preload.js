@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld('orbit', {
   avatar: {
     pick: (kind) => ipcRenderer.invoke('avatar:pick', kind),
   },
+  files: {
+    pick: () => ipcRenderer.invoke('files:pick'),
+    download: (url) => ipcRenderer.invoke('file:download', url),
+  },
   external: {
     open: (url) => ipcRenderer.invoke('shell:open-external', url),
   },

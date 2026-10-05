@@ -95,6 +95,49 @@ ipcMain.handle('avatar:pick', async (event, kind) => {
 
 // Chat messages come from other users and may contain links — never let
 // them navigate this window; only hand http(s) URLs to the OS browser.
+// --- Chat attachments ---
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 10;
+const MIME_BY_EXT = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.bmp': 'image/bmp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf', '.txt': 'text/plain',
+  '.zip': 'application/zip', '.rar': 'application/vnd.rar', '.7z': 'application/x-7z-compressed',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.mp4': 'video/mp4', '.mov': 'video/quicktime',
+  '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
+ipcMain.handle('files:pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Enviar arquivos',
+    properties: ['openFile', 'multiSelections'],
+  });
+  if (result.canceled) return { files: [], skipped: [] };
+  const files = [];
+  const skipped = [];
+  for (const filePath of result.filePaths.slice(0, MAX_ATTACHMENTS)) {
+    const name = path.basename(filePath);
+    try {
+      const { size } = fs.statSync(filePath);
+      if (size > MAX_ATTACHMENT_BYTES) { skipped.push(name); continue; }
+      const type = MIME_BY_EXT[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+      files.push({ name, size, type, data: fs.readFileSync(filePath) });
+    } catch {
+      skipped.push(name);
+    }
+  }
+  return { files, skipped };
+});
+
+// Downloads go through Electron's own download flow, which shows a native
+// "Salvar como" dialog because no save path is preset.
+ipcMain.handle('file:download', (event, url) => {
+  if (typeof url !== 'string' || !url.startsWith(`${SERVER_URL}/files/`)) return false;
+  mainWindow.webContents.downloadURL(url);
+  return true;
+});
+
 ipcMain.handle('shell:open-external', (event, url) => {
   try {
     const parsed = new URL(String(url));

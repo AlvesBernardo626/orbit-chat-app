@@ -42,6 +42,10 @@ const state = {
   contextMenuUser: null, // full user object the avatar-context-menu is currently pointed at
   friendsFilter: 'online', // 'online' | 'all' | 'pending'
   dmSearch: '',
+  replyingTo: null, // message being replied to in the composer
+  pendingAttachments: [], // { localId, name, type, size, data, previewUrl }
+  sending: false,
+  mention: null, // { start, end, items, index } while the @ autocomplete is open
 };
 
 const dom = {
@@ -136,6 +140,19 @@ const dom = {
   emojiPickerPanel: document.getElementById('emoji-picker-panel'),
   emojiPickerTabs: document.getElementById('emoji-picker-tabs'),
   emojiPickerGrid: document.getElementById('emoji-picker-grid'),
+  attachBtn: document.getElementById('attach-btn'),
+  composerReply: document.getElementById('composer-reply'),
+  composerReplyName: document.getElementById('composer-reply-name'),
+  composerReplyText: document.getElementById('composer-reply-text'),
+  composerReplyCancel: document.getElementById('composer-reply-cancel'),
+  composerAttachments: document.getElementById('composer-attachments'),
+  mentionPopup: document.getElementById('mention-popup'),
+  dropOverlay: document.getElementById('drop-overlay'),
+  lightbox: document.getElementById('lightbox'),
+  lightboxTitle: document.getElementById('lightbox-title'),
+  lightboxBody: document.getElementById('lightbox-body'),
+  lightboxDownload: document.getElementById('lightbox-download'),
+  lightboxClose: document.getElementById('lightbox-close'),
 
   callBar: document.getElementById('call-bar'),
   callBarTitle: document.getElementById('call-bar-title'),
@@ -227,6 +244,11 @@ const ICONS = {
   speaker: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4Z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
   chatBubble: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5v8c0 1.4-1.1 2.5-2.5 2.5H10l-4.5 4v-4H6.5C5.1 17 4 15.9 4 14.5v-8Z"/></svg>',
   crown: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M3 8l4.5 3.5L12 5l4.5 6.5L21 8l-2 10H5L3 8Z"/></svg>',
+  reply: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
+  pencil: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>',
+  file: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></svg>',
+  download: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 20h14"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   moreVertical: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
 };
 
@@ -393,6 +415,8 @@ async function logout() {
     friendsFilter: 'online',
     dmSearch: '',
   });
+  resetComposer();
+  closeLightbox();
   dom.dmSearch.value = '';
 
   dom.mainApp.hidden = true;
@@ -473,6 +497,11 @@ function bindRealtimeEvents() {
       renderChatMessages();
     } else {
       conv.unread += 1;
+      if (mentionsMe(message)) {
+        conv.mentioned = true;
+        const sender = currentFriend(peerId);
+        toast(`${sender ? sender.username : 'Alguém'} mencionou você`);
+      }
     }
     renderDmList();
     updateNavUnreadDot();
@@ -528,6 +557,12 @@ function bindRealtimeEvents() {
       renderGroupChatMessages();
     } else {
       conv.unread += 1;
+      if (mentionsMe(message)) {
+        conv.mentioned = true;
+        const group = currentGroup(groupId);
+        const sender = group && group.members.find((m) => m.id === message.from);
+        toast(`${sender ? sender.username : 'Alguém'} mencionou ${message.mentionAll ? 'todos' : 'você'} em ${group ? group.name : 'um grupo'}`);
+      }
     }
     renderDmList();
     updateNavUnreadDot();
@@ -718,6 +753,8 @@ function wireStaticHandlers() {
 
   // Chat input
   dom.chatInput.addEventListener('keydown', (e) => {
+    if (handleMentionKeys(e)) return;
+    if (e.key === 'Escape' && state.replyingTo) { cancelReply(); return; }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -726,14 +763,15 @@ function wireStaticHandlers() {
   dom.chatInput.addEventListener('input', () => {
     dom.chatInput.style.height = 'auto';
     dom.chatInput.style.height = `${Math.min(dom.chatInput.scrollHeight, 120)}px`;
+    updateMentionPopup();
   });
+  dom.chatInput.addEventListener('click', updateMentionPopup);
+  dom.chatInput.addEventListener('blur', () => setTimeout(closeMentionPopup, 120));
+  wireComposerAttachments();
+  wireLightbox();
   dom.chatSendBtn.addEventListener('click', sendMessage);
   wireEmojiPicker();
 
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('.msg-actions')) return;
-    dom.chatMessages.querySelectorAll('.msg-actions-menu').forEach((m) => { m.hidden = true; });
-  });
 
   // Conversas: start a group directly, without needing an active call
   dom.dmNewGroupBtn.addEventListener('click', () => openCreateGroupModal());
@@ -856,6 +894,12 @@ function closeAvatarContextMenu() {
 
 // ---------------- User profile viewer ----------------
 function openUserProfile(user) {
+  const avatarSrc = imageDataUrl(user.avatar);
+  const bannerSrc = imageDataUrl(user.banner);
+  dom.userProfileAvatar.classList.toggle('zoomable', !!avatarSrc);
+  dom.userProfileBanner.classList.toggle('zoomable', !!bannerSrc);
+  dom.userProfileAvatar.onclick = avatarSrc ? () => openLightbox({ mode: 'circle', src: avatarSrc, title: `Foto de ${user.username}` }) : null;
+  dom.userProfileBanner.onclick = bannerSrc ? () => openLightbox({ mode: 'banner', src: bannerSrc, title: `Banner de ${user.username}` }) : null;
   dom.userProfileCard.style.backgroundColor = user.profileColor || '';
   dom.userProfileStatusDot.style.borderColor = user.profileColor || '';
   dom.userProfileBanner.style.cssText = bannerStyle(user);
@@ -1191,6 +1235,8 @@ function renderProfile() {
     dom.profileColorBrightness.value = String(Math.round(profileColorWheel.value));
     syncColorPreview(profileColorWheel.hex());
   }
+  dom.profileAvatar.classList.toggle('zoomable', !!imageDataUrl(u.avatar));
+  dom.profileBanner.classList.toggle('zoomable', !!imageDataUrl(u.banner));
   // The wheel always shows a color, but the card only takes one once the
   // person actually picked it.
   dom.profileCard.style.backgroundColor = u.profileColor || '';
@@ -1270,7 +1316,7 @@ function renderRail(activeGroup) {
     const live = (g.activeCallMemberIds || []).length > 0;
     const groupLike = groupAsAvatarLike(g);
     let marker = '';
-    if (unread > 0) marker = `<span class="rail-badge">${unread > 99 ? '99+' : unread}</span>`;
+    if (unread > 0) marker = `<span class="rail-badge ${conv.mentioned ? 'mention' : ''}">${conv.mentioned ? '@' : (unread > 99 ? '99+' : unread)}</span>`;
     else if (live) marker = `<span class="rail-live">${ICONS.speaker.replace(/width="18" height="18"/, 'width="11" height="11"')}</span>`;
     return `
       <button class="rail-group ${activeGroup && activeGroup.id === g.id ? 'active' : ''}" data-rail-group="${g.id}" title="${escapeHtml(g.name)}">
@@ -1290,7 +1336,7 @@ function renderHomeSidebar() {
     .map((f) => {
       const conv = state.conversations[f.id];
       const lastMsg = conv && conv.messages && conv.messages.length ? conv.messages[conv.messages.length - 1] : null;
-      return { id: f.id, entity: f, lastMsg, unread: conv ? conv.unread : 0 };
+      return { id: f.id, entity: f, lastMsg, unread: conv ? conv.unread : 0, mentioned: !!(conv && conv.mentioned) };
     });
   rows.sort((a, b) => (b.lastMsg?.createdAt || 0) - (a.lastMsg?.createdAt || 0));
 
@@ -1305,9 +1351,9 @@ function renderHomeSidebar() {
   wireProfileContextMenus(dom.dmListItems);
 }
 
-function dmRowHtml({ id, entity: friend, lastMsg, unread }) {
+function dmRowHtml({ id, entity: friend, lastMsg, unread, mentioned }) {
   const preview = lastMsg
-    ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : ''}${escapeHtml(lastMsg.text)}`
+    ? `${lastMsg.from === state.currentUser.id ? 'Você: ' : ''}${escapeHtml(messagePreviewText(lastMsg))}`
     : escapeHtml(friend.status === 'offline' ? 'Offline' : (friend.statusMessage || availabilityLabel(friend.status)));
   const inCall = callManager.state !== 'idle' && callManager.peer && callManager.peer.id === friend.id;
   const selected = state.activeTab === 'chat' && state.selectedType === 'dm' && state.selectedPeerId === id;
@@ -1321,7 +1367,7 @@ function dmRowHtml({ id, entity: friend, lastMsg, unread }) {
       <div class="dm-row-name">${escapeHtml(friend.username)}</div>
       <div class="dm-row-preview">${inCall ? '<span class="dm-row-live">Em chamada</span>' : preview}</div>
     </div>
-    ${unread > 0 ? `<div class="dm-row-meta"><div class="dm-row-unread">${unread}</div></div>` : ''}
+    ${unread > 0 ? `<div class="dm-row-meta"><div class="dm-row-unread ${mentioned ? 'mention' : ''}">${mentioned ? '@' : unread}</div></div>` : ''}
   </div>`;
 }
 
@@ -1499,6 +1545,7 @@ function memberName(group, userId) {
 }
 
 async function selectConversation(peerId) {
+  if (state.selectedType !== 'dm' || state.selectedPeerId !== peerId) resetComposer();
   state.selectedType = 'dm';
   state.selectedPeerId = peerId;
   state.selectedGroupId = null;
@@ -1513,12 +1560,14 @@ async function selectConversation(peerId) {
     }
   }
   conv.unread = 0;
+  conv.mentioned = false;
   renderDmList();
   updateNavUnreadDot();
   renderChatMain();
 }
 
 async function selectGroupConversation(groupId) {
+  if (state.selectedType !== 'group' || state.selectedGroupId !== groupId) resetComposer();
   state.selectedType = 'group';
   state.selectedGroupId = groupId;
   state.selectedPeerId = null;
@@ -1533,6 +1582,7 @@ async function selectGroupConversation(groupId) {
     }
   }
   conv.unread = 0;
+  conv.mentioned = false;
   renderDmList();
   updateNavUnreadDot();
   renderChatMain();
@@ -1712,37 +1762,62 @@ function requestGroupScreenShare(group) {
 
 // ---------------- Messages ----------------
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 10;
+const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 function renderChatMessages() {
   const conv = state.conversations[state.selectedPeerId];
-  const friend = currentFriend(state.selectedPeerId);
-  renderMessageList((conv && conv.messages) || [], () => friend);
+  renderMessageList((conv && conv.messages) || []);
 }
 
 function renderGroupChatMessages() {
-  const group = currentGroup(state.selectedGroupId);
   const conv = state.groupConversations[state.selectedGroupId];
-  renderMessageList((conv && conv.messages) || [], (m) => (group ? group.members.find((mem) => mem.id === m.from) : null));
+  renderMessageList((conv && conv.messages) || []);
+}
+
+// Everyone who can appear in the open conversation (you included), with
+// their freshest known profile data.
+function conversationPeople() {
+  if (state.selectedType === 'group') {
+    const group = currentGroup(state.selectedGroupId);
+    if (!group) return [state.currentUser];
+    return group.members.map((m) => (m.id === state.currentUser.id
+      ? state.currentUser
+      : (state.friends.find((f) => f.id === m.id) || m)));
+  }
+  const friend = currentFriend(state.selectedPeerId);
+  return friend ? [state.currentUser, friend] : [state.currentUser];
+}
+
+function personById(id) {
+  return conversationPeople().find((p) => p.id === id) || findKnownUser(id);
 }
 
 // Shared by DMs and groups: day dividers, and consecutive messages from the
 // same person within a few minutes collapse under a single avatar/name.
-function renderMessageList(messages, authorOf) {
+function renderMessageList(messages) {
+  const people = conversationPeople();
   let html = '';
   let prev = null;
   messages.forEach((m) => {
     const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
     if (newDay) html += `<div class="day-divider">${dayLabel(m.createdAt)}</div>`;
-    const continued = !newDay && prev.from === m.from && m.createdAt - prev.createdAt < GROUP_WINDOW_MS;
-    const mine = m.from === state.currentUser.id;
-    html += messageRowHtml(m, mine ? state.currentUser : authorOf(m), mine, continued);
+    const continued = !newDay && !m.replyTo && prev.from === m.from && m.createdAt - prev.createdAt < GROUP_WINDOW_MS;
+    const author = people.find((p) => p.id === m.from) || findKnownUser(m.from);
+    html += messageRowHtml(m, author, m.from === state.currentUser.id, continued, people);
     prev = m;
   });
   dom.chatMessages.innerHTML = html;
-  dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+  scrollMessagesToBottom();
   wireMessageLinks();
   wireProfileContextMenus(dom.chatMessages);
   wireMessageActions(dom.chatMessages);
+  wireMessageMedia(dom.chatMessages);
+}
+
+function scrollMessagesToBottom() {
+  dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 }
 
 function dayKey(ts) {
@@ -1762,59 +1837,281 @@ function dayLabel(ts) {
   return d.toLocaleDateString('pt-BR', opts);
 }
 
-// Your own messages carry the edit menu, or — while state.editingMessageId
-// matches — an inline textarea in place of the text.
-function messageRowHtml(m, author, mine, continued) {
+function mentionsMe(m) {
+  if (!state.currentUser || m.from === state.currentUser.id) return false;
+  return !!m.mentionAll || (m.mentions || []).includes(state.currentUser.id);
+}
+
+function messagePreviewText(m) {
+  if (m.text) return m.text;
+  const files = m.attachments || [];
+  if (files.length === 0) return '';
+  if (files.every((a) => INLINE_IMAGE_TYPES.has(a.type))) return files.length > 1 ? `${files.length} imagens` : 'Imagem';
+  return files.length > 1 ? `${files.length} arquivos` : `Arquivo: ${files[0].name}`;
+}
+
+function fileUrl(id) {
+  return `${window.orbit.serverUrl}/files/${id}`;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
+}
+
+// Your own messages carry the edit action, or — while state.editingMessageId
+// matches — an inline textarea in place of the text. Every message can be
+// replied to.
+function messageRowHtml(m, author, mine, continued, people) {
   const editing = mine && state.editingMessageId === m.id;
   const lead = continued
     ? `<div class="msg-gutter"><div class="msg-gutter-time">${formatTime(m.createdAt)}</div></div>`
     : `<div class="avatar msg-avatar" style="${author ? avatarStyle(author) : ''}" ${author ? `data-profile="${author.id}"` : ''}>${author ? avatarInner(author) : ''}</div>`;
   const meta = continued ? '' : `
       <div class="msg-meta"><span class="msg-author">${escapeHtml(author ? author.username : 'Alguém')}</span><span class="msg-time">${formatTime(m.createdAt)}</span></div>`;
-  const body = editing
-    ? `<div class="msg-edit-wrap">
+  let body;
+  if (editing) {
+    body = `<div class="msg-edit-wrap">
         <textarea class="msg-edit-input" rows="1">${escapeHtml(m.text)}</textarea>
         <div class="msg-edit-hint">Enter para salvar · Esc para cancelar</div>
-      </div>`
-    : `<div class="msg-text">${linkifyHtml(m.text)}${editedTagHtml(m)}</div>`;
-  const actions = mine && !editing ? `
+      </div>`;
+  } else {
+    body = m.text ? `<div class="msg-text">${richTextHtml(m.text, people)}${editedTagHtml(m)}</div>` : '';
+  }
+  const actions = editing ? '' : `
       <div class="msg-actions">
-        <button class="msg-actions-btn" title="Mais opções">${ICONS.moreVertical}</button>
-        <div class="msg-actions-menu" hidden>
-          <button class="msg-actions-item" data-action="edit">Editar mensagem</button>
-        </div>
-      </div>` : '';
+        <button class="msg-action" data-action="reply" title="Responder">${ICONS.reply}</button>
+        ${mine ? `<button class="msg-action" data-action="edit" title="Editar mensagem">${ICONS.pencil}</button>` : ''}
+      </div>`;
   return `
-    <div class="msg-row ${mine ? 'msg-row-out' : ''} ${continued ? 'continued' : ''}" ${mine ? `data-msg-id="${m.id}"` : ''}>
+    <div class="msg-row ${mine ? 'msg-row-out' : ''} ${continued ? 'continued' : ''} ${mentionsMe(m) ? 'mentions-me' : ''}" data-msg-id="${m.id}">
       ${lead}
-      <div class="msg-body">${meta}${body}</div>
+      <div class="msg-body">${meta}${replyQuoteHtml(m.replyTo, people)}${body}${attachmentsHtml(m.attachments)}</div>
       ${actions}
     </div>`;
 }
 
+function replyQuoteHtml(replyTo, people) {
+  if (!replyTo) return '';
+  const author = personById(replyTo.from);
+  const name = author ? author.username : 'Alguém';
+  const snippet = replyTo.text
+    ? escapeHtml(replyTo.text)
+    : `<em>${replyTo.attachmentCount ? 'Anexo' : 'Mensagem'}</em>`;
+  return `
+      <button class="msg-reply" data-jump="${replyTo.id}" title="Ir para a mensagem original">
+        ${author ? `<span class="avatar avatar-xs" style="${avatarStyle(author)}">${avatarInner(author)}</span>` : ''}
+        <span class="msg-reply-author">${escapeHtml(name)}</span>
+        <span class="msg-reply-text">${snippet}</span>
+      </button>`;
+}
+
+function attachmentsHtml(attachments) {
+  if (!attachments || attachments.length === 0) return '';
+  const images = attachments.filter((a) => INLINE_IMAGE_TYPES.has(a.type));
+  const files = attachments.filter((a) => !INLINE_IMAGE_TYPES.has(a.type));
+  return `
+      <div class="msg-attachments">
+        ${images.length ? `<div class="msg-images ${images.length > 1 ? 'multi' : ''}">${images.map((a) => `
+          <button class="msg-image" data-image="${a.id}" data-name="${escapeHtml(a.name)}" title="${escapeHtml(a.name)}">
+            <img src="${fileUrl(a.id)}" alt="${escapeHtml(a.name)}" loading="lazy">
+          </button>`).join('')}</div>` : ''}
+        ${files.map((a) => `
+          <div class="msg-file">
+            <div class="msg-file-icon">${ICONS.file}</div>
+            <div class="msg-file-info">
+              <div class="msg-file-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</div>
+              <div class="msg-file-size">${formatBytes(a.size)}</div>
+            </div>
+            <button class="icon-btn" data-download="${a.id}" title="Baixar">${ICONS.download}</button>
+          </div>`).join('')}
+      </div>`;
+}
+
+// ---------------- Mentions ----------------
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const MENTION_END = '(?=$|[\\s.,!?;:)\\]])';
+
+// Escapes + linkifies like before, then highlights @todos and @<name> of
+// anyone in the conversation (outside of links).
+function richTextHtml(text, people) {
+  const html = linkifyHtml(text);
+  const names = people.map((p) => p.username).filter(Boolean);
+  const isGroup = state.selectedType === 'group';
+  const alts = [...names, ...(isGroup ? ['todos'] : [])]
+    .sort((a, b) => b.length - a.length)
+    .map((n) => escapeRegex(escapeHtml(n)));
+  if (alts.length === 0) return html;
+  const pattern = new RegExp(`(^|[\\s(])@(${alts.join('|')})${MENTION_END}`, 'gi');
+  const me = state.currentUser.username.toLowerCase();
+  return html.split(/(<a [^>]*>.*?<\/a>)/g).map((part, i) => {
+    if (i % 2 === 1) return part;
+    return part.replace(pattern, (match, lead, name) => {
+      const lower = name.toLowerCase();
+      const isMe = lower === escapeHtml(me) || (isGroup && lower === 'todos');
+      return `${lead}<span class="mention ${isMe ? 'mention-me' : ''}">@${name}</span>`;
+    });
+  }).join('');
+}
+
+function extractMentions(text) {
+  const isGroup = state.selectedType === 'group';
+  const others = conversationPeople().filter((p) => p.id !== state.currentUser.id);
+  const mentions = others
+    .filter((p) => new RegExp(`(^|[\\s(])@${escapeRegex(p.username)}${MENTION_END}`, 'i').test(text))
+    .map((p) => p.id);
+  const mentionAll = isGroup && new RegExp(`(^|[\\s(])@todos${MENTION_END}`, 'i').test(text);
+  return { mentions, mentionAll };
+}
+
+// "@" autocomplete: opens when the word under the cursor starts with @.
+function updateMentionPopup() {
+  const input = dom.chatInput;
+  const pos = input.selectionStart;
+  if (pos !== input.selectionEnd) { closeMentionPopup(); return; }
+  const before = input.value.slice(0, pos);
+  const at = before.lastIndexOf('@');
+  if (at < 0 || (at > 0 && !/\s/.test(before[at - 1]))) { closeMentionPopup(); return; }
+  const query = before.slice(at + 1);
+  if (query.length > 32 || query.includes('\n')) { closeMentionPopup(); return; }
+  const q = query.toLowerCase();
+
+  const items = conversationPeople()
+    .filter((p) => p.id !== state.currentUser.id)
+    .map((p) => ({ label: p.username, user: p, sub: `#${p.tag}` }));
+  if (state.selectedType === 'group') {
+    items.unshift({ label: 'todos', all: true, sub: 'Notifica todo mundo do grupo' });
+  }
+  const matches = items
+    .filter((it) => it.label.toLowerCase().includes(q))
+    .sort((a, b) => Number(b.label.toLowerCase().startsWith(q)) - Number(a.label.toLowerCase().startsWith(q)))
+    .slice(0, 8);
+  if (matches.length === 0) { closeMentionPopup(); return; }
+
+  const prevIndex = state.mention ? state.mention.index : 0;
+  state.mention = { start: at, end: pos, items: matches, index: Math.min(prevIndex, matches.length - 1) };
+  renderMentionPopup();
+}
+
+function renderMentionPopup() {
+  const m = state.mention;
+  dom.mentionPopup.hidden = false;
+  dom.mentionPopup.innerHTML = `
+    <div class="mention-popup-title">Mencionar</div>
+    ${m.items.map((it, i) => `
+      <button class="mention-item ${i === m.index ? 'active' : ''}" data-index="${i}" type="button">
+        ${it.all
+          ? '<span class="mention-item-all">@</span>'
+          : `<span class="avatar avatar-sm" style="${avatarStyle(it.user)}">${avatarInner(it.user)}</span>`}
+        <span class="mention-item-name">${it.all ? '@todos' : escapeHtml(it.label)}</span>
+        <span class="mention-item-sub">${escapeHtml(it.sub)}</span>
+      </button>`).join('')}`;
+  dom.mentionPopup.querySelectorAll('[data-index]').forEach((btn) => {
+    // mousedown (not click) so the textarea never loses its cursor position
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      applyMention(state.mention.items[Number(btn.dataset.index)]);
+    });
+  });
+}
+
+function closeMentionPopup() {
+  state.mention = null;
+  dom.mentionPopup.hidden = true;
+}
+
+function applyMention(item) {
+  if (!state.mention || !item) return;
+  const input = dom.chatInput;
+  const { start, end } = state.mention;
+  const insert = `@${item.label} `;
+  input.value = input.value.slice(0, start) + insert + input.value.slice(end);
+  const cursor = start + insert.length;
+  input.focus();
+  input.setSelectionRange(cursor, cursor);
+  closeMentionPopup();
+  input.dispatchEvent(new Event('input'));
+}
+
+// Returns true when the key was consumed by the open popup.
+function handleMentionKeys(e) {
+  if (!state.mention) return false;
+  const m = state.mention;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    m.index = (m.index + step + m.items.length) % m.items.length;
+    renderMentionPopup();
+    return true;
+  }
+  if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault();
+    applyMention(m.items[m.index]);
+    return true;
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeMentionPopup();
+    return true;
+  }
+  return false;
+}
+
+// ---------------- Message actions (reply / edit) ----------------
 function editedTagHtml(m) {
   return m.editedAt ? ' <span class="msg-edited-tag">(editada)</span>' : '';
 }
 
 function wireMessageActions(container) {
-  container.querySelectorAll('.msg-actions-btn').forEach((btn) => {
+  container.querySelectorAll('.msg-action').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const menu = btn.nextElementSibling;
-      const wasHidden = menu.hidden;
-      container.querySelectorAll('.msg-actions-menu').forEach((m) => { m.hidden = true; });
-      menu.hidden = !wasHidden;
+      const id = btn.closest('.msg-row').dataset.msgId;
+      if (btn.dataset.action === 'reply') startReply(id);
+      else if (btn.dataset.action === 'edit') startEditingMessage(id);
     });
   });
-  container.querySelectorAll('.msg-actions-item[data-action="edit"]').forEach((item) => {
-    item.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const row = item.closest('.msg-row');
-      startEditingMessage(row.dataset.msgId);
-    });
+  container.querySelectorAll('[data-jump]').forEach((btn) => {
+    btn.addEventListener('click', () => jumpToMessage(btn.dataset.jump));
   });
   const editWrap = container.querySelector('.msg-edit-wrap');
   if (editWrap) wireMessageEditInput(editWrap.querySelector('.msg-edit-input'));
+}
+
+function currentMessages() {
+  const conv = state.selectedType === 'group'
+    ? state.groupConversations[state.selectedGroupId]
+    : state.conversations[state.selectedPeerId];
+  return (conv && conv.messages) || [];
+}
+
+function startReply(id) {
+  const message = currentMessages().find((m) => m.id === id);
+  if (!message) return;
+  const author = personById(message.from);
+  state.replyingTo = message;
+  dom.composerReplyName.textContent = message.from === state.currentUser.id ? 'você mesmo' : (author ? author.username : 'Alguém');
+  dom.composerReplyText.textContent = messagePreviewText(message);
+  dom.composerReply.hidden = false;
+  dom.chatInput.focus();
+}
+
+function cancelReply() {
+  state.replyingTo = null;
+  dom.composerReply.hidden = true;
+}
+
+function jumpToMessage(id) {
+  const row = dom.chatMessages.querySelector(`[data-msg-id="${CSS.escape(id)}"]`);
+  if (!row) { toast('A mensagem original é antiga demais para aparecer aqui'); return; }
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  row.classList.remove('flash');
+  void row.offsetWidth; // restart the highlight animation
+  row.classList.add('flash');
 }
 
 function startEditingMessage(id) {
@@ -1847,10 +2144,12 @@ function wireMessageEditInput(input) {
 
 async function submitMessageEdit(id, text) {
   const trimmed = text.trim();
-  if (!trimmed) { toast('A mensagem não pode ficar vazia', 'err'); return; }
+  const original = currentMessages().find((m) => m.id === id);
+  const hasFiles = original && (original.attachments || []).length > 0;
+  if (!trimmed && !hasFiles) { toast('A mensagem não pode ficar vazia', 'err'); return; }
   state.editingMessageId = null;
   try {
-    const res = await emit('message:edit', { id, text: trimmed });
+    const res = await emit('message:edit', { id, text: trimmed, ...extractMentions(trimmed) });
     applyMessageEdit(res.message);
   } catch {
     toast('Não foi possível editar a mensagem', 'err');
@@ -1873,8 +2172,211 @@ function applyMessageEdit(message) {
   }
 }
 
-// Links in chat must never navigate this window (see main.js's
-// will-navigate guard) — always hand them to the OS's default browser.
+// ---------------- Attachments ----------------
+function wireMessageMedia(container) {
+  container.querySelectorAll('[data-image]').forEach((btn) => {
+    const img = btn.querySelector('img');
+    // Images load after the list renders; keep the view pinned to the
+    // bottom if that's where the person was.
+    img.addEventListener('load', () => {
+      const nearBottom = dom.chatMessages.scrollHeight - dom.chatMessages.scrollTop - dom.chatMessages.clientHeight < 400;
+      if (nearBottom) scrollMessagesToBottom();
+    });
+    btn.addEventListener('click', () => openLightbox({
+      mode: 'image',
+      src: fileUrl(btn.dataset.image),
+      title: btn.dataset.name,
+      downloadUrl: `${fileUrl(btn.dataset.image)}?download`,
+    }));
+  });
+  container.querySelectorAll('[data-download]').forEach((btn) => {
+    btn.addEventListener('click', () => downloadFile(`${fileUrl(btn.dataset.download)}?download`));
+  });
+}
+
+function downloadFile(url) {
+  window.orbit.files.download(url);
+}
+
+// files: [{ name, type, size, data }] from the picker, a drop or a paste.
+function addPendingFiles(files, skippedNames = []) {
+  const skipped = [...skippedNames];
+  files.forEach((f) => {
+    if (state.pendingAttachments.length >= MAX_ATTACHMENTS) { skipped.push(f.name); return; }
+    if (f.size > MAX_ATTACHMENT_BYTES) { skipped.push(f.name); return; }
+    const type = f.type || 'application/octet-stream';
+    state.pendingAttachments.push({
+      localId: Math.random().toString(36).slice(2),
+      name: f.name,
+      type,
+      size: f.size,
+      data: f.data,
+      previewUrl: INLINE_IMAGE_TYPES.has(type) ? URL.createObjectURL(new Blob([f.data], { type })) : null,
+    });
+  });
+  if (skipped.length) {
+    toast(skipped.length === 1
+      ? `"${skipped[0]}" não foi adicionado (máx. 10 arquivos de até 10 MB)`
+      : `${skipped.length} arquivos não foram adicionados (máx. 10 arquivos de até 10 MB)`, 'err');
+  }
+  renderPendingAttachments();
+  dom.chatInput.focus();
+}
+
+function removePendingAttachment(localId) {
+  const item = state.pendingAttachments.find((a) => a.localId === localId);
+  if (item && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+  state.pendingAttachments = state.pendingAttachments.filter((a) => a.localId !== localId);
+  renderPendingAttachments();
+}
+
+function clearPendingAttachments() {
+  state.pendingAttachments.forEach((a) => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
+  state.pendingAttachments = [];
+  renderPendingAttachments();
+}
+
+function renderPendingAttachments(status = '') {
+  const items = state.pendingAttachments;
+  dom.composerAttachments.hidden = items.length === 0;
+  dom.composerAttachments.innerHTML = items.map((a) => `
+    <div class="pending-file ${a.previewUrl ? 'is-image' : ''}">
+      ${a.previewUrl
+        ? `<img src="${a.previewUrl}" alt="">`
+        : `<div class="pending-file-icon">${ICONS.file}</div>`}
+      <div class="pending-file-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</div>
+      <div class="pending-file-size">${formatBytes(a.size)}</div>
+      ${state.sending ? '' : `<button class="pending-file-remove" data-remove="${a.localId}" title="Remover">${ICONS.close}</button>`}
+    </div>`).join('') + (status ? `<div class="pending-status">${escapeHtml(status)}</div>` : '');
+  dom.composerAttachments.querySelectorAll('[data-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => removePendingAttachment(btn.dataset.remove));
+  });
+}
+
+async function pickFilesToSend() {
+  if (!state.selectedType) return;
+  const { files, skipped } = await window.orbit.files.pick();
+  addPendingFiles(files, skipped);
+}
+
+async function fileListToPending(fileList) {
+  const files = await Promise.all([...fileList].map(async (file) => ({
+    name: file.name || 'imagem.png',
+    type: file.type,
+    size: file.size,
+    data: new Uint8Array(await file.arrayBuffer()),
+  })));
+  addPendingFiles(files);
+}
+
+function wireComposerAttachments() {
+  dom.attachBtn.addEventListener('click', pickFilesToSend);
+  dom.composerReplyCancel.addEventListener('click', cancelReply);
+
+  // Pasting an image (e.g. a screenshot) attaches it.
+  dom.chatInput.addEventListener('paste', (e) => {
+    const files = e.clipboardData && e.clipboardData.files;
+    if (!files || files.length === 0) return;
+    e.preventDefault();
+    fileListToPending(files);
+  });
+
+  // Never let a dropped file navigate the window away from the app.
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => e.preventDefault());
+
+  const view = dom.chatTextView;
+  let dragDepth = 0;
+  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  view.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth += 1;
+    dom.dropOverlay.hidden = false;
+  });
+  view.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dom.dropOverlay.hidden = true;
+  });
+  view.addEventListener('drop', (e) => {
+    dragDepth = 0;
+    dom.dropOverlay.hidden = true;
+    if (!hasFiles(e) || !state.selectedType) return;
+    e.preventDefault();
+    fileListToPending(e.dataTransfer.files);
+  });
+}
+
+// Reply target, attachments and the @ popup belong to one conversation.
+function resetComposer() {
+  cancelReply();
+  clearPendingAttachments();
+  closeMentionPopup();
+}
+
+// ---------------- Lightbox ----------------
+// mode 'circle' = profile photo (shows how the crop looks at real sizes),
+// 'banner' = profile banner, 'image' = chat attachment.
+function openLightbox({ mode, src, title, downloadUrl }) {
+  dom.lightboxTitle.textContent = title || '';
+  dom.lightboxDownload.hidden = !downloadUrl;
+  dom.lightboxDownload.onclick = downloadUrl ? () => downloadFile(downloadUrl) : null;
+  const url = escapeHtml(src);
+  if (mode === 'circle') {
+    dom.lightboxBody.innerHTML = `
+      <div class="lb-avatar-stage">
+        <div class="lb-avatar-big" style="background-image:url('${url}')"></div>
+        <div class="lb-previews">
+          <div class="lb-preview"><div class="avatar" style="width:96px;height:96px;background-image:url('${url}')"></div><span>Perfil</span></div>
+          <div class="lb-preview"><div class="avatar" style="width:44px;height:44px;background-image:url('${url}')"></div><span>Mensagens</span></div>
+          <div class="lb-preview"><div class="avatar" style="width:32px;height:32px;background-image:url('${url}')"></div><span>Listas</span></div>
+        </div>
+      </div>
+      <img class="lb-original" src="${url}" alt="Imagem original">
+      <div class="lb-caption">Imagem original</div>`;
+  } else if (mode === 'banner') {
+    dom.lightboxBody.innerHTML = `
+      <div class="lb-banner" style="background-image:url('${url}')"></div>
+      <div class="lb-caption">Como o banner aparece no seu perfil</div>
+      <img class="lb-original" src="${url}" alt="Imagem original">
+      <div class="lb-caption">Imagem original</div>`;
+  } else {
+    dom.lightboxBody.innerHTML = `<img class="lb-image" src="${url}" alt="${escapeHtml(title || '')}">`;
+  }
+  dom.lightbox.hidden = false;
+  dom.lightboxBody.scrollTop = 0;
+}
+
+function closeLightbox() {
+  dom.lightbox.hidden = true;
+  dom.lightboxBody.innerHTML = '';
+}
+
+function imageDataUrl(media) {
+  return media && media.type === 'image' && media.dataUrl ? media.dataUrl : null;
+}
+
+function wireLightbox() {
+  dom.lightboxClose.addEventListener('click', closeLightbox);
+  dom.lightbox.addEventListener('click', (e) => {
+    if (e.target === dom.lightbox || e.target === dom.lightboxBody) closeLightbox();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !dom.lightbox.hidden) closeLightbox();
+  });
+
+  // Profile tab: click your photo or banner to inspect how it turned out.
+  dom.profileAvatar.addEventListener('click', () => {
+    const src = imageDataUrl(state.currentUser && state.currentUser.avatar);
+    if (src) openLightbox({ mode: 'circle', src, title: 'Sua foto de perfil' });
+  });
+  dom.profileBanner.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    const src = imageDataUrl(state.currentUser && state.currentUser.banner);
+    if (src) openLightbox({ mode: 'banner', src, title: 'Seu banner' });
+  });
+}
+
+// ---------------- Emoji picker ----------------
 function wireEmojiPicker() {
   dom.emojiPickerTabs.innerHTML = EMOJI_CATEGORIES.map((cat, i) => `
     <button type="button" class="emoji-picker-tab${i === 0 ? ' active' : ''}" data-cat="${i}" title="${escapeHtml(cat.label)}">${cat.icon}</button>
@@ -1929,6 +2431,8 @@ function insertAtCursor(textarea, text) {
   textarea.dispatchEvent(new Event('input'));
 }
 
+// Links in chat must never navigate this window (see main.js's
+// will-navigate guard) — always hand them to the OS's default browser.
 function wireMessageLinks() {
   dom.chatMessages.querySelectorAll('a[data-ext-link]').forEach((a) => {
     a.addEventListener('click', (e) => {
@@ -1938,36 +2442,70 @@ function wireMessageLinks() {
   });
 }
 
-async function sendMessage() {
-  const text = dom.chatInput.value.trim();
-  if (!text || !state.selectedType) return;
-  dom.chatInput.value = '';
-  dom.chatInput.style.height = 'auto';
+// ---------------- Sending ----------------
+const SEND_ERRORS = {
+  too_large: 'Arquivo maior que 10 MB',
+  empty: 'Escreva algo ou anexe um arquivo',
+  not_friends: 'Vocês não são mais amigos',
+  not_member: 'Você não faz mais parte deste grupo',
+};
 
-  if (state.selectedType === 'group') {
-    const groupId = state.selectedGroupId;
-    try {
-      const res = await emit('group:message:send', { groupId, text });
-      const conv = state.groupConversations[groupId] || (state.groupConversations[groupId] = { messages: [], unread: 0 });
-      if (conv.messages === null) conv.messages = [];
-      conv.messages.push(res.message);
-      renderGroupChatMessages();
-      renderDmList();
-    } catch {
-      toast('Não foi possível enviar a mensagem', 'err');
-    }
-    return;
-  }
+async function sendMessage() {
+  if (state.sending || !state.selectedType) return;
+  const text = dom.chatInput.value.trim();
+  const files = state.pendingAttachments;
+  if (!text && files.length === 0) return;
+
+  const target = state.selectedType === 'group'
+    ? { type: 'group', id: state.selectedGroupId }
+    : { type: 'dm', id: state.selectedPeerId };
+  state.sending = true;
+  dom.chatSendBtn.disabled = true;
+  closeMentionPopup();
 
   try {
-    const res = await emit('message:send', { to: state.selectedPeerId, text });
-    const conv = state.conversations[state.selectedPeerId] || (state.conversations[state.selectedPeerId] = { messages: [], unread: 0 });
-    if (conv.messages === null) conv.messages = [];
-    conv.messages.push(res.message);
-    renderChatMessages();
+    const attachmentIds = [];
+    for (let i = 0; i < files.length; i++) {
+      renderPendingAttachments(files.length > 1 ? `Enviando ${i + 1} de ${files.length}...` : 'Enviando...');
+      const f = files[i];
+      const res = await emit('file:upload', { name: f.name, type: f.type, data: f.data });
+      attachmentIds.push(res.file.id);
+    }
+    const payload = {
+      text,
+      replyToId: state.replyingTo ? state.replyingTo.id : null,
+      attachmentIds,
+      ...extractMentions(text),
+    };
+
+    if (target.type === 'group') {
+      const res = await emit('group:message:send', { groupId: target.id, ...payload });
+      const conv = state.groupConversations[target.id] || (state.groupConversations[target.id] = { messages: [], unread: 0 });
+      if (conv.messages === null) conv.messages = [];
+      conv.messages.push(res.message);
+    } else {
+      const res = await emit('message:send', { to: target.id, ...payload });
+      const conv = state.conversations[target.id] || (state.conversations[target.id] = { messages: [], unread: 0 });
+      if (conv.messages === null) conv.messages = [];
+      conv.messages.push(res.message);
+    }
+
+    dom.chatInput.value = '';
+    dom.chatInput.style.height = 'auto';
+    state.sending = false;
+    resetComposer();
+    const stillHere = (target.type === 'group' && state.selectedGroupId === target.id)
+      || (target.type === 'dm' && state.selectedPeerId === target.id);
+    if (stillHere) {
+      if (target.type === 'group') renderGroupChatMessages(); else renderChatMessages();
+    }
     renderDmList();
-  } catch {
-    toast('Não foi possível enviar a mensagem', 'err');
+  } catch (err) {
+    toast(SEND_ERRORS[err.message] || 'Não foi possível enviar a mensagem', 'err');
+  } finally {
+    state.sending = false;
+    dom.chatSendBtn.disabled = false;
+    renderPendingAttachments();
   }
 }
 

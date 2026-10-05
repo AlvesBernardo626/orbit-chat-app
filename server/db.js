@@ -1,8 +1,11 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { MongoClient } = require('mongodb');
+const { MongoClient, GridFSBucket } = require('mongodb');
 
 const MAX_GROUP_MEMBERS = 10;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 10;
+const REPLY_SNIPPET = 160;
 const SALT_ROUNDS = 10;
 const NO_ID = { projection: { _id: 0 } };
 
@@ -36,6 +39,10 @@ async function createDb(mongoUri) {
   const friendships = db.collection('friendships');
   const messages = db.collection('messages');
   const groups = db.collection('groups');
+  // Attachments live in GridFS inside the same Atlas database, so they
+  // survive Render redeploys (its disk is wiped on every deploy).
+  const bucket = new GridFSBucket(db, { bucketName: 'attachments' });
+  const fileDocs = db.collection('attachments.files');
 
   await Promise.all([
     users.createIndex({ usernameLower: 1 }, { unique: true }),
@@ -48,6 +55,7 @@ async function createDb(mongoUri) {
     messages.createIndex({ groupId: 1 }),
     groups.createIndex({ id: 1 }, { unique: true }),
     groups.createIndex({ members: 1 }),
+    fileDocs.createIndex({ 'metadata.fileId': 1 }, { unique: true }),
   ]);
 
   async function generateTag(usernameLower) {
@@ -253,26 +261,102 @@ async function createDb(mongoUri) {
     return !!(f && f.status === 'accepted');
   }
 
-  async function addMessage(fromId, toId, text) {
+  // --- Attachments ---
+  async function saveFile(uploaderId, { name, type, data }) {
+    if (!Buffer.isBuffer(data) || data.length === 0) return { error: 'invalid_file' };
+    if (data.length > MAX_FILE_BYTES) return { error: 'too_large' };
+    const fileId = crypto.randomBytes(16).toString('hex');
+    const meta = {
+      id: fileId,
+      name: String(name || 'arquivo').slice(0, 180),
+      type: String(type || 'application/octet-stream').slice(0, 100),
+      size: data.length,
+    };
+    await new Promise((resolve, reject) => {
+      const upload = bucket.openUploadStream(meta.name, {
+        metadata: { fileId, uploaderId, type: meta.type, size: meta.size, createdAt: Date.now() },
+      });
+      upload.once('finish', resolve);
+      upload.once('error', reject);
+      upload.end(data);
+    });
+    return { file: meta };
+  }
+
+  async function getFile(fileId) {
+    const doc = await fileDocs.findOne({ 'metadata.fileId': String(fileId) });
+    if (!doc) return null;
+    return {
+      name: doc.filename,
+      type: doc.metadata.type,
+      size: doc.length,
+      stream: () => bucket.openDownloadStream(doc._id),
+    };
+  }
+
+  // Only files the sender uploaded themselves can be attached to a message.
+  async function resolveAttachments(uploaderId, ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    const wanted = [...new Set(ids.map(String))].slice(0, MAX_ATTACHMENTS);
+    const docs = await fileDocs.find({ 'metadata.fileId': { $in: wanted }, 'metadata.uploaderId': uploaderId }).toArray();
+    const byId = new Map(docs.map((d) => [d.metadata.fileId, d]));
+    return wanted.filter((id) => byId.has(id)).map((id) => {
+      const d = byId.get(id);
+      return { id, name: d.filename, type: d.metadata.type, size: d.length };
+    });
+  }
+
+  async function deleteFiles(fileIds) {
+    if (!fileIds.length) return;
+    const docs = await fileDocs.find({ 'metadata.fileId': { $in: fileIds } }, { projection: { _id: 1 } }).toArray();
+    await Promise.all(docs.map((d) => bucket.delete(d._id).catch(() => {})));
+  }
+
+  // --- Messages (DMs and groups share one collection) ---
+  // A reply stores a small snapshot of the original, so it still reads fine
+  // even if the original is edited later.
+  async function buildReply(replyToId, scope) {
+    if (!replyToId) return null;
+    const original = await messages.findOne({ id: String(replyToId), ...scope }, NO_ID);
+    if (!original) return null;
+    return {
+      id: original.id,
+      from: original.from,
+      text: String(original.text || '').slice(0, REPLY_SNIPPET),
+      attachmentCount: (original.attachments || []).length,
+    };
+  }
+
+  function dmScope(userIdA, userIdB) {
+    return { $or: [{ from: userIdA, to: userIdB }, { from: userIdB, to: userIdA }] };
+  }
+
+  async function createMessage(base, scope, { text, replyToId, attachmentIds, mentions, mentionAll }) {
+    const attachments = await resolveAttachments(base.from, attachmentIds);
+    const trimmed = String(text || '').trim().slice(0, 4000);
+    if (!trimmed && attachments.length === 0) return { error: 'empty' };
     const message = {
       id: crypto.randomUUID(),
-      from: fromId,
-      to: toId,
-      text: String(text).slice(0, 4000),
+      ...base,
+      text: trimmed,
       createdAt: Date.now(),
     };
+    const replyTo = await buildReply(replyToId, scope);
+    if (replyTo) message.replyTo = replyTo;
+    if (attachments.length) message.attachments = attachments;
+    if (mentions && mentions.length) message.mentions = mentions;
+    if (mentionAll) message.mentionAll = true;
     await messages.insertOne(message);
     delete message._id;
-    return message;
+    return { message };
+  }
+
+  async function addMessage(fromId, toId, content) {
+    return createMessage({ from: fromId, to: toId }, dmScope(fromId, toId), content);
   }
 
   async function getConversation(userIdA, userIdB, limit = 200) {
-    const all = await messages.find({
-      $or: [
-        { from: userIdA, to: userIdB },
-        { from: userIdB, to: userIdA },
-      ],
-    }, NO_ID).sort({ createdAt: 1 }).toArray();
+    const all = await messages.find(dmScope(userIdA, userIdB), NO_ID).sort({ createdAt: 1 }).toArray();
     return all.slice(-limit);
   }
 
@@ -281,15 +365,20 @@ async function createDb(mongoUri) {
     return conv[conv.length - 1] || null;
   }
 
+  async function getMessage(id) {
+    return messages.findOne({ id: String(id) }, NO_ID);
+  }
+
   // Shared by DM and group messages — both live in the same collection,
   // distinguished only by having `to` vs `groupId` set.
-  async function editMessage(id, userId, text) {
+  async function editMessage(id, userId, text, { mentions, mentionAll } = {}) {
     const message = await messages.findOne({ id }, NO_ID);
     if (!message) return { error: 'not_found' };
     if (message.from !== userId) return { error: 'forbidden' };
     const trimmed = String(text || '').trim().slice(0, 4000);
-    if (!trimmed) return { error: 'empty' };
-    await messages.updateOne({ id }, { $set: { text: trimmed, editedAt: Date.now() } });
+    if (!trimmed && !(message.attachments || []).length) return { error: 'empty' };
+    const set = { text: trimmed, editedAt: Date.now(), mentions: mentions || [], mentionAll: !!mentionAll };
+    await messages.updateOne({ id }, { $set: set });
     return { message: await messages.findOne({ id }, NO_ID) };
   }
 
@@ -341,17 +430,8 @@ async function createDb(mongoUri) {
     return groups.find({ members: userId }, NO_ID).toArray();
   }
 
-  async function addGroupMessage(groupId, fromId, text) {
-    const message = {
-      id: crypto.randomUUID(),
-      groupId,
-      from: fromId,
-      text: String(text).slice(0, 4000),
-      createdAt: Date.now(),
-    };
-    await messages.insertOne(message);
-    delete message._id;
-    return message;
+  async function addGroupMessage(groupId, fromId, content) {
+    return createMessage({ groupId, from: fromId }, { groupId }, content);
   }
 
   async function getGroupConversation(groupId, limit = 200) {
@@ -366,8 +446,10 @@ async function createDb(mongoUri) {
     const group = await getGroupById(groupId);
     if (!group) return { error: 'not_found' };
     if (group.createdBy !== userId) return { error: 'forbidden' };
+    const withFiles = await messages.find({ groupId, attachments: { $exists: true } }, NO_ID).toArray();
     await groups.deleteOne({ id: groupId });
     await messages.deleteMany({ groupId });
+    await deleteFiles(withFiles.flatMap((m) => m.attachments.map((a) => a.id)));
     return { group };
   }
 
@@ -385,6 +467,9 @@ async function createDb(mongoUri) {
     listPendingIncoming,
     listPendingOutgoing,
     areFriends,
+    saveFile,
+    getFile,
+    getMessage,
     addMessage,
     getConversation,
     lastMessageWith,
@@ -401,4 +486,4 @@ async function createDb(mongoUri) {
   };
 }
 
-module.exports = { createDb, MAX_GROUP_MEMBERS };
+module.exports = { createDb, MAX_GROUP_MEMBERS, MAX_FILE_BYTES };

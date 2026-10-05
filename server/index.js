@@ -1,7 +1,7 @@
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
-const { createDb } = require('./db');
+const { createDb, MAX_FILE_BYTES } = require('./db');
 const { getIceServers } = require('./turn');
 const { PORT, STATUSES } = require('../shared/constants');
 
@@ -11,9 +11,30 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
   const db = await createDb(mongoUri);
   const app = express();
   const httpServer = http.createServer(app);
-  const io = new Server(httpServer, { cors: { origin: '*' } });
+  // Files travel over the socket (so uploads are tied to the logged-in
+  // user), which needs room for one attachment per message frame.
+  const io = new Server(httpServer, { cors: { origin: '*' }, maxHttpBufferSize: MAX_FILE_BYTES + 512 * 1024 });
 
   app.get('/health', (req, res) => res.json({ ok: true }));
+
+  // Attachment ids are random 128-bit tokens, so a link is only reachable by
+  // people who were sent it. Only well-known raster images render inline;
+  // everything else is forced to download as an opaque binary.
+  const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+  app.get('/files/:id', async (req, res) => {
+    if (!/^[0-9a-f]{32}$/.test(req.params.id)) return res.status(404).end();
+    const file = await db.getFile(req.params.id).catch(() => null);
+    if (!file) return res.status(404).end();
+    const inline = INLINE_IMAGE_TYPES.has(file.type) && req.query.download === undefined;
+    res.set({
+      'Content-Type': inline ? file.type : 'application/octet-stream',
+      'Content-Length': String(file.size),
+      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    file.stream().on('error', () => res.destroy()).pipe(res);
+  });
 
   /** userId -> Set<socket.id> */
   const presence = new Map();
@@ -108,6 +129,13 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
 
   function onlineGroupMembers(group, excludeUserId) {
     return group.members.filter((id) => id !== excludeUserId && presence.has(id) && presence.get(id).size > 0);
+  }
+
+  // Mentions are only kept for people who can actually see the message.
+  function cleanMentions(mentions, allowedIds) {
+    if (!Array.isArray(mentions)) return [];
+    const allowed = new Set(allowedIds);
+    return [...new Set(mentions.map(String))].filter((id) => allowed.has(id)).slice(0, 20);
   }
 
   io.on('connection', (socket) => {
@@ -229,14 +257,25 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       ack && ack({ friends: friends.map(publicUser), incoming: incoming.map(publicUser), outgoing: outgoing.map(publicUser) });
     });
 
-    socket.on('message:send', async ({ to, text }, ack) => {
+    socket.on('file:upload', async ({ name, type, data } = {}, ack) => {
+      if (!currentUserId) return ack && ack({ error: 'unauthorized' });
+      try {
+        const result = await db.saveFile(currentUserId, { name, type, data });
+        ack && ack(result);
+      } catch {
+        ack && ack({ error: 'upload_failed' });
+      }
+    });
+
+    socket.on('message:send', async ({ to, text, replyToId, attachmentIds, mentions } = {}, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
       if (!(await db.areFriends(currentUserId, to))) return ack && ack({ error: 'not_friends' });
-      const trimmed = String(text || '').trim();
-      if (!trimmed) return ack && ack({ error: 'empty' });
-      const message = await db.addMessage(currentUserId, to, trimmed);
-      ack && ack({ ok: true, message });
-      io.to(`user:${to}`).emit('message:receive', message);
+      const result = await db.addMessage(currentUserId, to, {
+        text, replyToId, attachmentIds, mentions: cleanMentions(mentions, [to]),
+      });
+      if (result.error) return ack && ack({ error: result.error });
+      ack && ack({ ok: true, message: result.message });
+      io.to(`user:${to}`).emit('message:receive', result.message);
     });
 
     socket.on('messages:history', async ({ withUserId }, ack) => {
@@ -247,9 +286,19 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
 
     // Shared by both DM and group messages — the message itself carries
     // `to` or `groupId`, which decides who this gets broadcast to.
-    socket.on('message:edit', async ({ id, text }, ack) => {
+    socket.on('message:edit', async ({ id, text, mentions, mentionAll } = {}, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      const result = await db.editMessage(id, currentUserId, text);
+      const original = await db.getMessage(id);
+      if (!original) return ack && ack({ error: 'not_found' });
+      let allowed = [original.to];
+      if (original.groupId) {
+        const group = await db.getGroupById(original.groupId);
+        allowed = group ? group.members : [];
+      }
+      const result = await db.editMessage(id, currentUserId, text, {
+        mentions: cleanMentions(mentions, allowed),
+        mentionAll: !!original.groupId && !!mentionAll,
+      });
       if (result.error) return ack && ack({ error: result.error });
       const { message } = result;
       ack && ack({ ok: true, message });
@@ -322,14 +371,16 @@ async function startServer(mongoUri, { port = PORT, host = '127.0.0.1' } = {}) {
       ack && ack({ groups: payloads });
     });
 
-    socket.on('group:message:send', async ({ groupId, text }, ack) => {
+    socket.on('group:message:send', async ({ groupId, text, replyToId, attachmentIds, mentions, mentionAll } = {}, ack) => {
       if (!currentUserId) return ack && ack({ error: 'unauthorized' });
-      if (!(await db.isGroupMember(groupId, currentUserId))) return ack && ack({ error: 'not_member' });
-      const trimmed = String(text || '').trim();
-      if (!trimmed) return ack && ack({ error: 'empty' });
-      const message = await db.addGroupMessage(groupId, currentUserId, trimmed);
-      ack && ack({ ok: true, message });
       const group = await db.getGroupById(groupId);
+      if (!group || !group.members.includes(currentUserId)) return ack && ack({ error: 'not_member' });
+      const result = await db.addGroupMessage(groupId, currentUserId, {
+        text, replyToId, attachmentIds, mentions: cleanMentions(mentions, group.members), mentionAll: !!mentionAll,
+      });
+      if (result.error) return ack && ack({ error: result.error });
+      const { message } = result;
+      ack && ack({ ok: true, message });
       group.members.forEach((id) => {
         if (id !== currentUserId) io.to(`user:${id}`).emit('group:message:receive', message);
       });
